@@ -95,6 +95,16 @@ pnpm test:e2e
 The route is live at `/harbourmaster` with no routing change — `GameHost` resolves
 `:gameId` through the registry.
 
+## A worked example
+
+`frontend/src/games/2048/` is this procedure carried out end to end: rules in
+`engine.ts` (pure, unit-tested), the save document and its transitions in
+`state.ts`, input and API traffic in `index.tsx`, and its own `styles.css` riding
+along in the same chunk. It also shows the platform's other three surfaces in
+use — `progress` for lifetime stats, `scores` for a leaderboard, `events` for a
+run's milestones — and `e2e/src/2048.spec.ts` seeds a known board through
+`PUT /saves/default` rather than reaching into the database.
+
 ## Notes
 
 - **Notifications.** `POST /api/push/test` sends to the caller's devices. For real

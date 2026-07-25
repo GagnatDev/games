@@ -30,8 +30,22 @@ export type GameDefinition = {
 };
 
 export const LANDFALL_ID = "landfall";
+export const GAME_2048_ID = "2048";
 
 export const GAMES: readonly GameDefinition[] = [
+  {
+    id: GAME_2048_ID,
+    title: "2048",
+    tagline: "Slide the tiles, merge the pairs, and keep the board alive to 2048.",
+    status: "live",
+    stateVersion: 1,
+    config: {
+      size: 4,
+      winningTile: 2048,
+      /** The leaderboard the game posts a finished run to. */
+      scoreBoard: "high-score",
+    },
+  },
   {
     id: LANDFALL_ID,
     title: "Landfall",

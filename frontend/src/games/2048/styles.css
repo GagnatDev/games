@@ -1,0 +1,294 @@
+/* 2048's own stylesheet. It is imported from the game's entry module, so Vite
+   emits it as part of this game's chunk — the shell and the other games never
+   download it. Everything is prefixed `g2048-` and inherits the shell's palette
+   variables rather than redefining them. */
+
+.g2048 {
+  --g2048-gap: clamp(6px, 1.8vw, 12px);
+  --g2048-slide: 110ms;
+  align-items: center;
+}
+
+.g2048-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 26rem;
+}
+
+.g2048-scores {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.g2048-score {
+  min-width: 5.5rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  text-align: center;
+}
+
+.g2048-score dt {
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.g2048-score dd {
+  margin: 0.1rem 0 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Board ───────────────────────────────────────────────────────────────── */
+
+.g2048-stage {
+  position: relative;
+  width: 100%;
+  max-width: 26rem;
+}
+
+/* The frame is a border, not padding: absolutely positioned tiles are laid out
+   against the padding box, so a border keeps `inset: 0` and `100%` meaning
+   exactly one playfield. */
+.g2048-board {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border: var(--g2048-gap) solid var(--panel);
+  border-radius: var(--radius);
+  background: var(--panel);
+  /* cqi below is a share of the board, so every tile scales with the board. */
+  container-type: inline-size;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.g2048-board:focus-visible {
+  outline: 2px solid var(--sea);
+  outline-offset: 3px;
+}
+
+.g2048-cells {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+  gap: var(--g2048-gap);
+}
+
+.g2048-cell {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--deeper) 55%, var(--panel));
+}
+
+.g2048-tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  width: calc((100% - 3 * var(--g2048-gap)) / 4);
+  height: calc((100% - 3 * var(--g2048-gap)) / 4);
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #24404d;
+  color: #cfe3ea;
+  font-size: 9cqi;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  /* Percentages resolve against the tile's own box, so one step is one tile
+     plus one gap — no measuring, no resize handler. */
+  transform: translate(
+    calc(var(--col) * (100% + var(--g2048-gap))),
+    calc(var(--row) * (100% + var(--g2048-gap)))
+  );
+  transition: transform var(--g2048-slide) ease-in-out;
+}
+
+/* Four digits need the smaller size; `scale` is left free for the animations. */
+.g2048-tile--wide {
+  font-size: 6.4cqi;
+}
+
+/* The tile a merge consumed. It slides to the destination under the survivor and
+   is unmounted once the slide is done. */
+.g2048-tile--ghost {
+  z-index: 0;
+}
+
+.g2048-tile--merged {
+  animation: g2048-pop 160ms ease-in-out;
+}
+
+.g2048-tile--fresh {
+  animation: g2048-appear 150ms ease-out;
+}
+
+/* Individual `scale` composes with `transform`, so the pop does not have to
+   restate the translate. */
+@keyframes g2048-pop {
+  0% {
+    scale: 1;
+  }
+  50% {
+    scale: 1.16;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+@keyframes g2048-appear {
+  from {
+    scale: 0.35;
+    opacity: 0;
+  }
+  to {
+    scale: 1;
+    opacity: 1;
+  }
+}
+
+/* Cool for the small numbers, warm as the run gets serious. */
+.g2048-tile[data-value="4"] {
+  background: #2e5060;
+  color: #dceaf0;
+}
+
+.g2048-tile[data-value="8"] {
+  background: #2f7f8d;
+  color: #062028;
+}
+
+.g2048-tile[data-value="16"] {
+  background: #3f9fb0;
+  color: #05202a;
+}
+
+.g2048-tile[data-value="32"] {
+  background: #56c0c9;
+  color: #04222a;
+}
+
+.g2048-tile[data-value="64"] {
+  background: #7ad2c2;
+  color: #04222a;
+}
+
+.g2048-tile[data-value="128"] {
+  background: #c99a4a;
+  color: #1a1206;
+}
+
+.g2048-tile[data-value="256"] {
+  background: #d8a657;
+  color: #1a1206;
+}
+
+.g2048-tile[data-value="512"] {
+  background: #e5b45f;
+  color: #1a1206;
+}
+
+.g2048-tile[data-value="1024"] {
+  background: #efc06a;
+  color: #1a1206;
+}
+
+.g2048-tile[data-value="2048"],
+.g2048-tile[data-value="4096"],
+.g2048-tile[data-value="8192"],
+.g2048-tile[data-value="big"] {
+  background: linear-gradient(135deg, #f4cd74, #3f9fb0);
+  color: #06191f;
+  box-shadow: 0 0 0 1px #f4cd74, 0 0 18px color-mix(in srgb, #f4cd74 45%, transparent);
+}
+
+/* ── Overlays ────────────────────────────────────────────────────────────── */
+
+.g2048-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  text-align: center;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--deeper) 78%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.g2048-overlay__title {
+  font-size: clamp(1.4rem, 7vw, 2rem);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+/* ── Touch controls ──────────────────────────────────────────────────────── */
+
+.g2048-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 2.9rem);
+  grid-template-rows: repeat(2, 2.4rem);
+  gap: 0.35rem;
+  justify-content: center;
+}
+
+.g2048-pad button {
+  padding: 0;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.g2048-pad__up {
+  grid-area: 1 / 2;
+}
+
+.g2048-pad__left {
+  grid-area: 2 / 1;
+}
+
+.g2048-pad__down {
+  grid-area: 2 / 2;
+}
+
+.g2048-pad__right {
+  grid-area: 2 / 3;
+}
+
+/* ── Leaderboard ─────────────────────────────────────────────────────────── */
+
+.g2048-scoreboard {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0 0 0 1.2rem;
+}
+
+.g2048-scoreboard li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.g2048-scoreboard__value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

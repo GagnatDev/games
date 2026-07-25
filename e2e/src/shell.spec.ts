@@ -20,19 +20,24 @@ test("a game's code only arrives when the game is opened", async ({ page }) => {
     if (request.resourceType() === "script") scripts.push(request.url());
   });
 
+  // A build hash may contain a hyphen, so `\w` is not enough to match one.
+  const chunk = (game: string) => new RegExp(`game-${game}-[\\w-]+\\.js`);
+  const requested = (game: string) => scripts.filter((url) => chunk(game).test(url));
+
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Games", level: 1 })).toBeVisible();
 
   // The shell must not pull any game's chunk. This is the whole point of the
   // lazy registry — a static import would quietly undo it.
-  expect(scripts.filter((url) => /game-landfall-\w+\.js/.test(url))).toHaveLength(0);
+  expect(requested("landfall")).toHaveLength(0);
+  expect(requested("2048")).toHaveLength(0);
 
   await page.getByRole("link", { name: /Landfall/ }).click();
 
   await expect(page.getByRole("heading", { name: "Landfall", level: 1 })).toBeVisible();
-  await expect
-    .poll(() => scripts.filter((url) => /game-landfall-\w+\.js/.test(url)).length)
-    .toBeGreaterThan(0);
+  await expect.poll(() => requested("landfall").length).toBeGreaterThan(0);
+  // …and opening one game still does not drag another one's code along.
+  expect(requested("2048")).toHaveLength(0);
 });
 
 test("a deep link into a game is served by the backend", async ({ page }) => {

@@ -1,7 +1,7 @@
 import { lazy, type LazyExoticComponent, type ComponentType } from "react";
 // Values come from the `catalogue` subpath, types from the root: importing the
 // package root for values would pull the Zod API schemas into the shell chunk.
-import { GAMES, LANDFALL_ID } from "@games/shared/catalogue";
+import { GAMES, GAME_2048_ID, LANDFALL_ID } from "@games/shared/catalogue";
 import type { GameDefinition } from "@games/shared";
 
 /**
@@ -19,6 +19,7 @@ import type { GameDefinition } from "@games/shared";
 export type GameComponent = LazyExoticComponent<ComponentType>;
 
 const loaders: Record<string, GameComponent> = {
+  [GAME_2048_ID]: lazy(() => import("./2048/index")),
   [LANDFALL_ID]: lazy(() => import("./landfall/index")),
 };
 

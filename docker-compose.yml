@@ -1,0 +1,46 @@
+# Local stack: Postgres plus the app image. No MinIO — `games` has no bucket.
+# Pattern: homectl-reference/templates/docker-compose.yml.
+#
+# For day-to-day work prefer `pnpm dev` (Vite + tsx against this Postgres);
+# `docker compose up` is the check that the image itself boots and migrates.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: games
+      POSTGRES_PASSWORD: games
+      POSTGRES_DB: games
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U games -d games"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://games:games@postgres:5432/games
+      - PORT=8080
+      # Fixed local player, no auth service. To exercise the real sidecar, run
+      # the homectl-auth-proxy image in front with DEV_FAKE_IDENTITY set — see
+      # .env.sidecar for the exact command.
+      - AUTH_MODE=dev
+      # Web Push stays off unless you generate a local pair:
+      #   pnpm --filter @games/backend run vapid:generate
+      # - VAPID_PUBLIC_KEY=
+      # - VAPID_PRIVATE_KEY=
+      # - VAPID_SUBJECT=mailto:dev@homectl.no
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

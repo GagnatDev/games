@@ -1,0 +1,168 @@
+# games.homectl.no — Deployment + Service + Ingress, behind the homectl-auth-proxy
+# sidecar. Pattern: homectl-reference/templates/k8s/deployment.yml (aivo/unforked).
+#
+# CRITICAL WIRING:  ingress → Service:80 → auth-proxy:4180 → app:8080
+#   The app port is never a Service target and never an ingress backend. If it
+#   were reachable directly, a client could set X-Homectl-* itself and play as
+#   anyone — the injected identity is only trustworthy because every request
+#   passes through the sidecar, which strips inbound X-Homectl-*/Authorization.
+#
+# Prereqs in homectl-infra (`games = { postgres = true, auth = true, vapid = true }`):
+#   games-terraform-secrets → DATABASE_URL, AUTH_CLIENT_ID, AUTH_CLIENT_SECRET, COOKIE_KEY
+#   games-vapid-secrets     → VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT
+# $IMAGE_TAG is substituted by .github/workflows/deploy.yml (the commit SHA).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: games
+  namespace: homectl
+spec:
+  # Multi-pod is safe: the sidecar is stateless (the session lives in its
+  # encrypted cookie) and all replicas read the same COOKIE_KEY, so any request
+  # can hit any pod. No Redis, no sticky sessions.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: games
+  template:
+    metadata:
+      labels:
+        app: games
+    spec:
+      containers:
+        # ── The app ───────────────────────────────────────────────────────────
+        # Pod-local only: reachable exclusively through the sidecar.
+        - name: games
+          image: rg.fr-par.scw.cloud/homectl/games:$IMAGE_TAG
+          ports:
+            - containerPort: 8080
+          envFrom:
+            # Terraform-managed: DATABASE_URL + the sidecar's auth credentials.
+            - secretRef:
+                name: games-terraform-secrets
+            # Terraform-managed when vapid = true. Optional so the app still
+            # boots (with push disabled) before the first apply creates it.
+            - secretRef:
+                name: games-vapid-secrets
+                optional: true
+            # Hand-managed extras, if any are ever needed.
+            - secretRef:
+                name: games-secrets
+                optional: true
+          env:
+            # Read the verified X-Homectl-* headers the sidecar injects.
+            - name: AUTH_MODE
+              value: sidecar
+          startupProbe:
+            # Migrations run before the server listens, so first boot gets room.
+            httpGet:
+              path: /health
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+
+        # ── Auth sidecar (homectl-auth-proxy) ─────────────────────────────────
+        # Runs the OAuth flow, holds the encrypted hs_session cookie, refreshes
+        # tokens in-cluster, injects the verified identity, proxies to the app.
+        #
+        # BYPASS_STATIC_AUTH defaults to true, which is load-bearing here: the SPA
+        # is built with base=/static/, so a logged-out client can still fetch an
+        # updated service worker. Behind an auth-gated sw.js, installed PWAs can
+        # never update (homectl-reference/docs/pwa-auth-sidecar-pitfalls.md §6).
+        - name: auth-proxy
+          image: rg.fr-par.scw.cloud/homectl/homectl-auth-proxy:latest
+          ports:
+            - name: proxy
+              containerPort: 4180
+          env:
+            - name: PUBLIC_AUTH_URL
+              value: https://auth.homectl.no
+            - name: INTERNAL_AUTH_URL
+              value: http://homectl-auth.homectl
+            - name: APP_BASE_URL
+              value: https://games.homectl.no
+            - name: UPSTREAM
+              value: http://127.0.0.1:8080
+            - name: AUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: games-terraform-secrets
+                  key: AUTH_CLIENT_ID
+            - name: AUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: games-terraform-secrets
+                  key: AUTH_CLIENT_SECRET
+            - name: COOKIE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: games-terraform-secrets
+                  key: COOKIE_KEY
+            - name: NODE_ENV
+              value: production
+          readinessProbe:
+            httpGet: { path: /readyz, port: 4180 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 4180 }
+            initialDelaySeconds: 3
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "25m", memory: "64Mi" }
+            limits: { cpu: "250m", memory: "256Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: games
+  namespace: homectl
+spec:
+  selector:
+    app: games
+  ports:
+    - port: 80
+      targetPort: 4180 # → the SIDECAR, never the app's 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: games
+  namespace: homectl
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - games.homectl.no
+      secretName: games-tls
+  rules:
+    - host: games.homectl.no
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: games
+                port:
+                  number: 80

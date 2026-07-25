@@ -1,0 +1,61 @@
+/**
+ * The game catalogue — the single source of truth for what lives at
+ * `https://games.homectl.no/<id>`.
+ *
+ * This is deliberately *metadata only*: no game logic, no React, no server code,
+ * so both bundles can import it without pulling a game in. The frontend maps
+ * each id to a lazily imported chunk (`frontend/src/games/registry.ts`) and the
+ * backend upserts these rows into the `games` table at boot
+ * (`backend/src/games/sync.ts`).
+ *
+ * Adding a game = add an entry here + a chunk in the frontend registry. See
+ * `docs/adding-a-game.md`.
+ */
+
+export type GameStatus = "shell" | "alpha" | "beta" | "live";
+
+export type GameDefinition = {
+  /** URL slug and primary key. kebab-case, stable forever — saves key off it. */
+  readonly id: string;
+  readonly title: string;
+  readonly tagline: string;
+  readonly status: GameStatus;
+  /**
+   * Version of *this game's own* `state` jsonb shape. The platform never reads
+   * the state; the game bumps this when it needs to migrate its own saves.
+   */
+  readonly stateVersion: number;
+  /** Static, game-owned config. Mirrored into the `games.config` jsonb column. */
+  readonly config: Readonly<Record<string, unknown>>;
+};
+
+export const LANDFALL_ID = "landfall";
+
+export const GAMES: readonly GameDefinition[] = [
+  {
+    id: LANDFALL_ID,
+    title: "Landfall",
+    tagline:
+      "Charter a tramp freighter, chase cargo across the world's ports, and try to out-trade the tide.",
+    status: "shell",
+    stateVersion: 1,
+    config: {
+      // Shell placeholders. Real tuning lands with the game itself.
+      startingCapital: 250_000,
+      currency: "USD",
+      inspiredBy: "Ports of Call (1986)",
+    },
+  },
+];
+
+const byId = new Map(GAMES.map((game) => [game.id, game]));
+
+export const GAME_IDS: readonly string[] = GAMES.map((game) => game.id);
+
+export function findGame(id: string): GameDefinition | undefined {
+  return byId.get(id);
+}
+
+export function isGameId(id: string): boolean {
+  return byId.has(id);
+}

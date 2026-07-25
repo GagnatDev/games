@@ -1,0 +1,153 @@
+# Tests + build on PRs and main. Pattern:
+# homectl-reference/templates/github-workflows/ci.yaml.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      # Backend integration tests reuse this instead of starting Testcontainers.
+      DATABASE_URL: postgresql://games:games@localhost:5432/games
+      AUTH_MODE: dev
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: games
+          POSTGRES_PASSWORD: games
+          POSTGRES_DB: games
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U games -d games"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Both other packages typecheck against shared's emitted declarations.
+      - name: Build shared
+        run: pnpm --filter @games/shared run build
+
+      - name: Typecheck
+        run: pnpm -r run typecheck
+
+      - name: Shared tests
+        run: pnpm --filter @games/shared run test
+
+      - name: Backend tests
+        run: pnpm --filter @games/backend run test
+
+      - name: Frontend unit tests
+        run: pnpm --filter @games/frontend run test:unit
+
+      # Also asserts that every game still builds into its own chunk
+      # (frontend/scripts/check-chunks.mjs).
+      - name: Build backend and frontend
+        run: |
+          pnpm --filter @games/backend run build
+          pnpm --filter @games/frontend run build
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: |
+            shared/dist
+            backend/dist
+            frontend/dist
+          retention-days: 3
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: verify
+    concurrency:
+      group: e2e-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      CI: "true"
+      # The harness detects DATABASE_URL and skips Testcontainers.
+      DATABASE_URL: postgresql://games:games@localhost:5432/games
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: games
+          POSTGRES_PASSWORD: games
+          POSTGRES_DB: games
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U games -d games"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The e2e harness boots the built bundle + built SPA, exactly as the pod does.
+      - name: Download build output
+        uses: actions/download-artifact@v4
+        with:
+          name: build
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright browsers
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: pnpm --filter @games/e2e exec playwright install --with-deps chromium
+
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter @games/e2e exec playwright install-deps chromium
+
+      - name: Run e2e tests
+        run: pnpm --filter @games/e2e run test:e2e
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 14

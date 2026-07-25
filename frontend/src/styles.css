@@ -1,0 +1,377 @@
+/* One stylesheet for the shell. A game is free to bring its own — it ships in
+   that game's chunk, so nothing else pays for it. */
+
+:root {
+  --deep: #0b1a24;
+  --deeper: #071219;
+  --panel: #12242f;
+  --panel-edge: #1d3843;
+  --ink: #e8f1f5;
+  --ink-muted: #8fa8b4;
+  --brass: #d8a657;
+  --sea: #3f9fb0;
+  --danger: #e2706a;
+  --radius: 12px;
+  --gap: 1rem;
+
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(120% 80% at 50% -10%, #163040 0%, transparent 60%),
+    var(--deep);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--sea);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+h1,
+h2 {
+  margin: 0;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+h1 {
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+}
+
+h2 {
+  font-size: 1.1rem;
+}
+
+p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+
+.app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app--centered {
+  justify-content: center;
+  align-items: center;
+  padding: var(--gap);
+}
+
+.app__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 0.9rem clamp(1rem, 4vw, 2rem);
+  border-bottom: 1px solid var(--panel-edge);
+  background: color-mix(in srgb, var(--deeper) 80%, transparent);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding-top: max(0.9rem, env(safe-area-inset-top));
+}
+
+.app__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.app__brand:hover {
+  text-decoration: none;
+}
+
+.app__brand-mark {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 3px;
+  background: linear-gradient(135deg, var(--brass), var(--sea));
+}
+
+.app__brand-host {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+.app__nav {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.app__nav a {
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  color: var(--ink-muted);
+}
+
+.app__nav a:hover {
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.app__nav a.active {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.app__main {
+  flex: 1;
+  width: 100%;
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: clamp(1rem, 4vw, 2rem);
+}
+
+.app__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem clamp(1rem, 4vw, 2rem);
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--panel-edge);
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+
+/* ── Pieces ──────────────────────────────────────────────────────────────── */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.row--tight {
+  gap: 0.5rem;
+}
+
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--radius);
+  padding: 1.1rem;
+}
+
+.card--notice {
+  max-width: 34rem;
+}
+
+.card--game {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  color: var(--ink);
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.card--game:hover {
+  text-decoration: none;
+  border-color: var(--sea);
+  transform: translateY(-2px);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+  gap: var(--gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pill {
+  align-self: flex-start;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid currentcolor;
+  color: var(--ink-muted);
+}
+
+.pill--shell {
+  color: var(--brass);
+}
+
+.pill--live {
+  color: var(--sea);
+}
+
+.muted {
+  color: var(--ink-muted);
+}
+
+.small {
+  font-size: 0.85rem;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.ticks {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--ink-muted);
+  line-height: 1.7;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.facts dd {
+  margin: 0.15rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.code-block {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: var(--deeper);
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  overflow-x: auto;
+}
+
+.banner {
+  display: flex;
+  gap: var(--gap);
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem 1rem;
+  background: var(--brass);
+  color: var(--deeper);
+  font-size: 0.9rem;
+}
+
+/* ── Controls ────────────────────────────────────────────────────────────── */
+
+button,
+input[type="text"] {
+  font: inherit;
+  border-radius: 8px;
+  border: 1px solid var(--panel-edge);
+  padding: 0.5rem 0.9rem;
+}
+
+button {
+  background: var(--sea);
+  color: var(--deeper);
+  border-color: transparent;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--panel-edge);
+}
+
+button.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--sea);
+  font-weight: 400;
+  text-decoration: underline;
+}
+
+input[type="text"] {
+  background: var(--deeper);
+  color: var(--ink);
+  min-width: 12rem;
+  flex: 1;
+}
+
+input[type="checkbox"] {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--sea);
+}
+
+label {
+  cursor: pointer;
+}
+
+summary {
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

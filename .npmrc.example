@@ -1,0 +1,9 @@
+# `games` has no @gagnatdev/* dependencies — it integrates homectl-auth through
+# the forward-auth sidecar, not the private client library — so a plain
+# `pnpm install` works with no registry auth.
+#
+# Keep this file for the day the app does need a private package: copy it to
+# .npmrc (gitignored), create a GitHub PAT with the `read:packages` scope, and
+#   export GITHUB_TOKEN=ghp_xxx
+@gagnatdev:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}

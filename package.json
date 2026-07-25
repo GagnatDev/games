@@ -1,0 +1,27 @@
+{
+  "name": "games",
+  "private": true,
+  "description": "games.homectl.no — a PWA hosting several small games, one code-split chunk each",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel -r run dev",
+    "dev:sidecar": "pnpm --parallel -r run dev:sidecar",
+    "build": "pnpm --filter @games/shared run build && pnpm --filter @games/backend run build && pnpm --filter @games/frontend run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm --filter @games/shared run test && pnpm --filter @games/backend run test && pnpm --filter @games/frontend run test:unit",
+    "test:e2e": "pnpm --filter @games/e2e run test:e2e",
+    "lint": "pnpm -r run lint"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "// onlyBuiltDependencies": "pnpm 10 blocks install scripts by default. esbuild is the only dependency that needs one; the rest (native speedups behind testcontainers) work fine without.",
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

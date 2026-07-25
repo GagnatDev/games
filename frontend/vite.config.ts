@@ -115,6 +115,17 @@ export default defineConfig({
           }
           return undefined;
         },
+        /**
+         * A game's stylesheet travels with its chunk, so name it the same way.
+         * Left to the default it would be `index-[hash].css` — indistinguishable
+         * from the shell's own stylesheet in `dist/assets`.
+         */
+        assetFileNames(asset) {
+          const game = asset.originalFileNames
+            .map((file) => /\/?src\/games\/([^/]+)\//.exec(file)?.[1])
+            .find(Boolean);
+          return game ? `assets/game-${game}-[hash][extname]` : "assets/[name]-[hash][extname]";
+        },
       },
     },
   },

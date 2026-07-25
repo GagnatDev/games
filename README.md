@@ -5,7 +5,14 @@ own address and in its own bundle:
 
 | Game | Address | State |
 |------|---------|-------|
+| [2048](frontend/src/games/2048) | `games.homectl.no/2048` | playable |
 | [Landfall](frontend/src/games/landfall) | `games.homectl.no/landfall` | shell only |
+
+**2048** is the tile-sliding puzzle, played with the arrow keys or a swipe. The
+whole run — board, seed and score — lives in one save document on the server, so a
+game started on the laptop continues on the phone, and a finished run posts to a
+leaderboard. Rules in [`engine.ts`](frontend/src/games/2048/engine.ts), save shape
+in [`state.ts`](frontend/src/games/2048/state.ts).
 
 **Landfall** is a modern take on *Ports of Call* (1986): charter a tramp freighter,
 chase cargo across the world's ports, out-trade the tide. Right now it is a shell —

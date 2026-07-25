@@ -52,7 +52,8 @@ The requirement is that opening one game does not pay for the others.
 ```
 index-<hash>.js          the shell: router, hub, profile, API client   ~15 kB
 vendor-react-<hash>.js   React + router, cached across every game     ~230 kB
-game-landfall-<hash>.js  Landfall, and nothing else                    ~57 kB
+game-2048-<hash>.js      2048, plus game-2048-<hash>.css               ~14 kB
+game-landfall-<hash>.js  Landfall, and nothing else                     ~4 kB
 ```
 
 How it holds together:
@@ -62,12 +63,16 @@ How it holds together:
 2. `frontend/src/games/registry.ts` maps each id to a `lazy(() => import(...))`
    with a literal path. That dynamic import is what creates the chunk.
 3. `vite.config.ts` names those dynamic chunks `game-<id>-<hash>.js` via
-   `chunkFileNames`. It does **not** use `manualChunks` for games: forcing a game's
+   `chunkFileNames`, and a stylesheet imported by a game the same way through
+   `assetFileNames`. It does **not** use `manualChunks` for games: forcing a game's
    modules into a named chunk turns that chunk into a magnet and the shell ends up
    statically importing it — the exact thing being avoided.
 4. `frontend/scripts/check-chunks.mjs` fails the build if a catalogue game has no
    chunk, and an e2e test asserts at runtime that loading `/` fetches no
    `game-*.js` while opening `/landfall` does.
+
+A game's own CSS therefore travels with its chunk: `index.html` links only the
+shell stylesheet, and `game-2048-<hash>.css` arrives when 2048 does.
 
 Value imports from `@games/shared` use the `catalogue` subpath rather than the
 package root, so the Zod API schemas stay out of the shell chunk.

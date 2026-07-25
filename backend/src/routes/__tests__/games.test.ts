@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { LANDFALL_ID } from "@games/shared";
+import { GAME_IDS, LANDFALL_ID, type GameSummary } from "@games/shared";
 import { closePool } from "../../db/pool.js";
 import { api, asPlayer, resetDb } from "../../test/helpers.js";
 
@@ -18,14 +18,18 @@ describe("catalogue", () => {
     const res = await api().get("/api/games");
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([
+    // Every game in the code-owned catalogue, and nothing else.
+    expect(res.body.map((game: GameSummary) => game.id).sort()).toEqual(
+      [...GAME_IDS].sort(),
+    );
+    expect(res.body).toContainEqual(
       expect.objectContaining({
         id: LANDFALL_ID,
         title: "Landfall",
         status: "shell",
         lastPlayedAt: null,
       }),
-    ]);
+    );
   });
 
   it("404s an unknown game rather than creating orphan rows", async () => {
@@ -189,7 +193,8 @@ describe("progress", () => {
     await api().put(`${GAME}/saves/default`).send({ state: {}, stateVersion: 1 });
 
     const list = await api().get("/api/games");
-    expect(list.body[0].lastPlayedAt).not.toBeNull();
+    const played = list.body.find((game: GameSummary) => game.id === LANDFALL_ID);
+    expect(played?.lastPlayedAt).not.toBeNull();
   });
 });
 

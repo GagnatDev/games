@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { port } from "./world";
 
 /**
  * Landfall's save document.
@@ -199,7 +200,7 @@ export function newGameState(founding: Founding): LandfallState {
     log: [
       {
         day: 1,
-        text: `${founding.company} founded. ${founding.ship.name} lies ready in ${founding.homePort}.`,
+        text: `${founding.company} founded. ${founding.ship.name} lies ready in ${port(founding.homePort).name}.`,
         tone: "good",
       },
     ],

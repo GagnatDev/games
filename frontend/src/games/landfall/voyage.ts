@@ -107,7 +107,7 @@ export function depart(state: LandfallState, plan: DeparturePlan): LandfallState
   next = logged(
     next,
     plan.contract
-      ? `${plan.ship.name} cleared for ${destination} — ${plan.contract.tons.toLocaleString("en-US")}t of ${plan.contract.cargo} at ${plan.speed} knots.`
+      ? `${plan.ship.name} cleared for ${destination} — ${plan.contract.tons.toLocaleString("en-US")}t of ${cargo(plan.contract.cargo).name.toLowerCase()} at ${plan.speed} knots.`
       : `${plan.ship.name} sailing in ballast for ${destination}.`,
   );
   if (tolls > 0) {
@@ -439,7 +439,7 @@ export function completeArrival(
     const deliveredTons = Math.max(0, contract.tons - arrival.lostTons);
     let payment = Math.round(contract.payment * (deliveredTons / contract.tons));
 
-    let text = `${deliveredTons.toLocaleString("en-US")}t of ${contract.cargo} delivered in ${here.name}`;
+    let text = `${deliveredTons.toLocaleString("en-US")}t of ${cargo(contract.cargo).name.toLowerCase()} delivered in ${here.name}`;
     if (contract.deadlineDay !== null && next.day > contract.deadlineDay) {
       const daysLate = next.day - contract.deadlineDay;
       const penalty = Math.min(LATE_PENALTY_CAP, daysLate * LATE_PENALTY_PER_DAY);

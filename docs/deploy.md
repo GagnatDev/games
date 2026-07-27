@@ -66,8 +66,9 @@ Then in a browser:
    **no** token in JS.
 2. The hub lists **Landfall**. Open it: the network panel shows a
    `game-landfall-*.js` request that was absent on the hub — the split is real.
-3. On `/landfall`, **Create a save** → *Saved at revision 1*. Reload: the revision
-   survives, so Postgres and JIT user provisioning both work.
+3. On `/landfall`, found a company (pick a ship, **Sign the papers**) → the save
+   status shows *Saved · revision 1*. Reload: the company survives, so Postgres
+   and JIT user provisioning both work.
 4. `/profile` → set a display name, toggle a preference, reload. Both persist in the
    `users` row's jsonb `profile`.
 5. `/profile` → **Enable notifications**, then **Send a test**. A notification

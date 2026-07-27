@@ -1,33 +1,239 @@
 import { z } from "zod";
+import { port } from "./world";
 
 /**
- * Landfall's own save shape.
+ * Landfall's save document.
  *
- * This is the pattern the whole platform is built around: the database stores
- * `state` as opaque jsonb, and the *game* — here, in its own chunk — is the only
- * thing that knows what is inside it. Changing this schema is a code change plus a
- * `STATE_VERSION` bump, never a database migration.
+ * The platform stores `state` as opaque jsonb — this file is the only thing
+ * that knows what is inside it, and the only place a save migration would
+ * live. A document that does not parse is reported, never silently reset.
+ *
+ * Version 1 was the deploy-check shell (a port name, a cash number and a log).
+ * There is no company to carry over from it, so it does not migrate; the UI
+ * reports it and offers to found a company, which is an explicit player
+ * action, not a silent reset.
  */
 
-export const STATE_VERSION = 1;
+export const STATE_VERSION = 2;
 
-export const landfallStateSchema = z.object({
-  version: z.literal(STATE_VERSION),
-  /** Placeholder while the game is a shell — enough to prove persistence works. */
-  captain: z.object({
-    port: z.string(),
+// ── Pieces ───────────────────────────────────────────────────────────────────
+
+export const shipSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    /** A `ShipModel` id from `world.ts`. */
+    model: z.string(),
+    /** Hull and engine health, 0–100. Wear accrues; repairs cost money. */
+    condition: z.number().min(0).max(100),
+    /** Bunker fuel on board, tons. */
+    fuel: z.number().min(0),
+    /** Where she lies — null while at sea. */
+    port: z.string().nullable(),
+    /** Chartered out: earns a day rate, unavailable to sail. */
+    chartered: z.boolean(),
+    boughtDay: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type Ship = z.infer<typeof shipSchema>;
+
+export const contractSchema = z
+  .object({
+    id: z.string(),
+    cargo: z.string(),
+    tons: z.number().positive(),
+    from: z.string(),
+    to: z.string(),
+    ratePerTon: z.number().positive(),
+    payment: z.number().positive(),
+    /** Deliver by this game day or forfeit part of the payment. */
+    deadlineDay: z.number().int().positive().nullable(),
+  })
+  .strict();
+
+export type Contract = z.infer<typeof contractSchema>;
+
+const pendingEventSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("storm") }).strict(),
+  z.object({ kind: z.literal("engine"), cost: z.number().nonnegative() }).strict(),
+  z.object({ kind: z.literal("rescue") }).strict(),
+  z.object({ kind: z.literal("pirates"), tribute: z.number().nonnegative() }).strict(),
+  z.object({ kind: z.literal("fuel"), cost: z.number().nonnegative() }).strict(),
+]);
+
+export type PendingEvent = z.infer<typeof pendingEventSchema>;
+
+export const voyageSchema = z
+  .object({
+    shipId: z.string(),
+    /** Null when sailing in ballast to reposition. */
+    contract: contractSchema.nullable(),
+    speed: z.number().positive(),
+    /** Node ids origin → destination, exactly as `nav.ts` produced them. */
+    legs: z.array(z.string()).min(2),
+    distanceNm: z.number().positive(),
+    coveredNm: z.number().nonnegative(),
+    dayAtSea: z.number().int().nonnegative(),
+    /** Highest piracy weight on the route, decided at departure. */
+    piracy: z.number().nonnegative(),
+    /** Cargo lost to weather or pirates, tons. */
+    lostTons: z.number().nonnegative(),
+    /** A noon report awaiting the captain's decision blocks the next day. */
+    pendingEvent: pendingEventSchema.nullable(),
+  })
+  .strict();
+
+export type Voyage = z.infer<typeof voyageSchema>;
+
+export const arrivalSchema = z
+  .object({
+    shipId: z.string(),
+    portId: z.string(),
+    contract: contractSchema.nullable(),
+    lostTons: z.number().nonnegative(),
+    /** The tugs are on strike — the captain berths her by hand. */
+    tugStrike: z.boolean(),
+  })
+  .strict();
+
+export type Arrival = z.infer<typeof arrivalSchema>;
+
+const phaseSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("port") }).strict(),
+  z.object({ kind: z.literal("voyage"), voyage: voyageSchema }).strict(),
+  z.object({ kind: z.literal("docking"), arrival: arrivalSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("bankrupt"),
+      day: z.number().int().positive(),
+      finalNetWorth: z.number(),
+    })
+    .strict(),
+]);
+
+export type Phase = z.infer<typeof phaseSchema>;
+
+const logEntrySchema = z
+  .object({
+    day: z.number().int().nonnegative(),
+    text: z.string(),
+    tone: z.enum(["info", "good", "bad"]),
+  })
+  .strict();
+
+export type LogEntry = z.infer<typeof logEntrySchema>;
+
+export const statsSchema = z
+  .object({
+    voyages: z.number().int().nonnegative(),
+    deliveredTons: z.number().nonnegative(),
+    milesSailed: z.number().nonnegative(),
+    rescues: z.number().int().nonnegative(),
+    manualDockings: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type Stats = z.infer<typeof statsSchema>;
+
+// ── The document ─────────────────────────────────────────────────────────────
+
+export const MAX_LOG = 80;
+
+export const landfallStateSchema = z
+  .object({
+    version: z.literal(STATE_VERSION),
+    company: z.string().min(1),
+    homePort: z.string(),
+    /** Game day, 1 = founding day. */
+    day: z.number().int().positive(),
     cash: z.number(),
-  }),
-  log: z.array(z.object({ at: z.string(), note: z.string() })).max(50),
-});
+    loan: z.number().nonnegative(),
+    /** Standing with brokers and harbourmasters, 0–100. */
+    reputation: z.number().min(0).max(100),
+    /** Fixed at founding; every market in the world derives from it. */
+    seed: z.number().int().nonnegative(),
+    /** The evolving dice state — the seas roll the same after a reload. */
+    rng: z.number().int().nonnegative(),
+    ships: z.array(shipSchema),
+    /** The ship the player is commanding. */
+    activeShipId: z.string().nullable(),
+    phase: phaseSchema,
+    log: z.array(logEntrySchema).max(MAX_LOG),
+    stats: statsSchema,
+  })
+  .strict();
 
 export type LandfallState = z.infer<typeof landfallStateSchema>;
 
-export function newGameState(): LandfallState {
+// ── Constructors & helpers ───────────────────────────────────────────────────
+
+export type Founding = {
+  company: string;
+  homePort: string;
+  seed: number;
+  cash: number;
+  ship: Omit<Ship, "port" | "chartered" | "boughtDay">;
+};
+
+export function newGameState(founding: Founding): LandfallState {
   return {
     version: STATE_VERSION,
-    captain: { port: "oslo", cash: 250_000 },
-    log: [],
+    company: founding.company,
+    homePort: founding.homePort,
+    day: 1,
+    cash: founding.cash,
+    loan: 0,
+    reputation: 50,
+    seed: founding.seed >>> 0,
+    rng: (founding.seed ^ 0x5f3759df) >>> 0,
+    ships: [
+      {
+        ...founding.ship,
+        port: founding.homePort,
+        chartered: false,
+        boughtDay: 1,
+      },
+    ],
+    activeShipId: founding.ship.id,
+    phase: { kind: "port" },
+    log: [
+      {
+        day: 1,
+        text: `${founding.company} founded. ${founding.ship.name} lies ready in ${port(founding.homePort).name}.`,
+        tone: "good",
+      },
+    ],
+    stats: {
+      voyages: 0,
+      deliveredTons: 0,
+      milesSailed: 0,
+      rescues: 0,
+      manualDockings: 0,
+    },
+  };
+}
+
+/** Append to the ship's log, oldest entries falling off the end. */
+export function logged(
+  state: LandfallState,
+  text: string,
+  tone: LogEntry["tone"] = "info",
+): LandfallState {
+  return {
+    ...state,
+    log: [...state.log.slice(-(MAX_LOG - 1)), { day: state.day, text, tone }],
+  };
+}
+
+export function activeShip(state: LandfallState): Ship | null {
+  return state.ships.find((ship) => ship.id === state.activeShipId) ?? null;
+}
+
+export function replaceShip(state: LandfallState, ship: Ship): LandfallState {
+  return {
+    ...state,
+    ships: state.ships.map((existing) => (existing.id === ship.id ? ship : existing)),
   };
 }
 

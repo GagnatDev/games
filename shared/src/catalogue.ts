@@ -51,12 +51,15 @@ export const GAMES: readonly GameDefinition[] = [
     title: "Landfall",
     tagline:
       "Charter a tramp freighter, chase cargo across the world's ports, and try to out-trade the tide.",
-    status: "shell",
-    stateVersion: 1,
+    status: "beta",
+    // v2: the real game document (company, fleet, voyages) replaced the shell
+    // placeholder. v1 saves are reported in-game, never overwritten.
+    stateVersion: 2,
     config: {
-      // Shell placeholders. Real tuning lands with the game itself.
-      startingCapital: 250_000,
+      startingCapital: 2_500_000,
       currency: "USD",
+      /** The leaderboard a completed voyage posts the company's worth to. */
+      scoreBoard: "fortune",
       inspiredBy: "Ports of Call (1986)",
     },
   },

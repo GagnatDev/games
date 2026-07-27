@@ -26,7 +26,7 @@ describe("catalogue", () => {
       expect.objectContaining({
         id: LANDFALL_ID,
         title: "Landfall",
-        status: "shell",
+        status: "beta",
         lastPlayedAt: null,
       }),
     );

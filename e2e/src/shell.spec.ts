@@ -59,19 +59,22 @@ test("an unknown path renders the not-found view, not a server error", async ({ 
 test("the game shell persists a save and reads it back", async ({ page }) => {
   await page.goto("/landfall");
 
-  await expect(page.getByText("none yet")).toBeVisible();
+  // A fresh player lands on founding day.
+  await expect(page.getByRole("heading", { name: "Found the company" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Create a save" }).click();
-  await expect(page.getByText("Saved at revision 1.")).toBeVisible();
-  // Exact, so it matches the fact list rather than the status line above.
-  await expect(page.getByText("revision 1", { exact: true })).toBeVisible();
+  await page.getByLabel("Company name").fill("Deploy Check Lines");
+  await page.locator(".lf-offer").first().click();
+  await page.getByRole("button", { name: "Sign the papers" }).click();
 
-  await page.getByRole("button", { name: "Write another revision" }).click();
-  await expect(page.getByText("Saved at revision 2.")).toBeVisible();
+  // The company is live and the save is in Postgres.
+  await expect(page.getByRole("heading", { name: /freight market/ })).toBeVisible();
+  await expect(page.getByTestId("lf-save-status")).toContainText("revision 1");
 
-  // Survives a full reload, so it really is in Postgres.
+  // Survives a full reload, so it really is stored server-side.
   await page.reload();
-  await expect(page.getByText("revision 2", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /freight market/ })).toBeVisible();
+  await expect(page.getByText("Deploy Check Lines")).toBeVisible();
+  await expect(page.getByTestId("lf-save-status")).toContainText("revision 1");
 });
 
 test("the profile stores a display name and a preference document", async ({ page }) => {

@@ -1,0 +1,811 @@
+/* Landfall — the chart room at night.
+   Ships in the game's own chunk; the shell never pays for it.
+   Builds on the shell's tokens (--deep, --panel, --brass, --sea, …). */
+
+.lf {
+  --lf-water: #0a1826;
+  --lf-land: #15293a;
+  --lf-land-edge: #2b4a61;
+  --lf-line: rgba(120, 170, 200, 0.14);
+  --lf-glow: #57c4d8;
+  --lf-gold: var(--brass);
+  --lf-good: #7fd8a5;
+  --lf-bad: var(--danger);
+}
+
+.lf-good {
+  color: var(--lf-good);
+}
+
+.lf-bad {
+  color: var(--lf-bad);
+}
+
+/* ── The chart ──────────────────────────────────────────────────────────── */
+
+.lf-map {
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--lf-water);
+  box-shadow:
+    inset 0 0 60px rgba(0, 0, 0, 0.45),
+    0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.lf-map svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.lf-map__land {
+  fill: var(--lf-land);
+  stroke: var(--lf-land-edge);
+  stroke-width: 0.6;
+  stroke-linejoin: round;
+}
+
+.lf-map__grid line {
+  stroke: var(--lf-line);
+  stroke-width: 0.5;
+}
+
+.lf-map__grid .lf-map__equator {
+  stroke: rgba(120, 170, 200, 0.22);
+  stroke-dasharray: 6 5;
+}
+
+.lf-map__port {
+  fill: #6d8899;
+  transition: r 120ms ease;
+}
+
+.lf-map__port--here {
+  fill: var(--lf-gold);
+}
+
+.lf-map__port--destination {
+  fill: var(--lf-glow);
+}
+
+.lf-map__port--pick {
+  fill: #9db4c2;
+}
+
+.lf-map__hit {
+  cursor: pointer;
+  outline: none;
+}
+
+.lf-map__hit:hover .lf-map__port,
+.lf-map__hit:focus-visible .lf-map__port {
+  fill: var(--lf-glow);
+  r: 5;
+}
+
+.lf-map__label {
+  fill: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  paint-order: stroke;
+  stroke: rgba(5, 12, 18, 0.85);
+  stroke-width: 3px;
+}
+
+.lf-map__route {
+  fill: none;
+  stroke: rgba(216, 166, 87, 0.55);
+  stroke-width: 1.6;
+  stroke-dasharray: 5 5;
+  animation: lf-route-crawl 1.6s linear infinite;
+}
+
+.lf-map__route-done {
+  fill: none;
+  stroke: var(--lf-gold);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+@keyframes lf-route-crawl {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+.lf-map__ship path {
+  fill: var(--lf-gold);
+  stroke: #f4d9a8;
+  stroke-width: 0.6;
+}
+
+.lf-map__ship-ring {
+  fill: none;
+  stroke: rgba(216, 166, 87, 0.5);
+  animation: lf-ping 2.2s ease-out infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+
+@keyframes lf-ping {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.4);
+  }
+  80% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+
+/* ── Instruments ────────────────────────────────────────────────────────── */
+
+.lf-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.25rem;
+  padding: 0.8rem 1.1rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 45%),
+    var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--radius);
+}
+
+.lf-status__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.lf-status__pennant {
+  width: 0.7rem;
+  height: 1rem;
+  clip-path: polygon(0 0, 100% 0, 60% 50%, 100% 100%, 0 100%);
+  background: linear-gradient(135deg, var(--lf-gold), var(--sea));
+  flex: none;
+}
+
+.lf-status__company {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lf-status__gauges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.4rem;
+  margin: 0;
+}
+
+.lf-gauge dt {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-muted);
+}
+
+.lf-gauge dd {
+  margin: 0.1rem 0 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.lf-meter {
+  display: inline-block;
+  width: 5.2rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: var(--deeper);
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.lf-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--sea), var(--lf-glow));
+  transition: width 300ms ease;
+}
+
+.lf-meter--tall {
+  width: 100%;
+  height: 0.6rem;
+}
+
+.lf-meter > span.lf-meter--bad {
+  background: linear-gradient(90deg, #a4483f, var(--lf-bad));
+}
+
+/* ── Panels & tabs ──────────────────────────────────────────────────────── */
+
+.lf-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 40%),
+    var(--panel);
+}
+
+.lf-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap);
+}
+
+.lf-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.lf-tab {
+  background: transparent;
+  color: var(--ink-muted);
+  border: 1px solid var(--panel-edge);
+  border-radius: 999px;
+  padding: 0.4rem 0.95rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.lf-tab--on {
+  background: var(--panel);
+  color: var(--lf-gold);
+  border-color: color-mix(in srgb, var(--lf-gold) 45%, transparent);
+}
+
+.lf-primary {
+  background: var(--lf-gold);
+  color: var(--deeper);
+}
+
+button.lf-danger {
+  color: var(--lf-bad);
+  border-color: color-mix(in srgb, var(--lf-bad) 40%, transparent);
+}
+
+/* ── Fleet strip ────────────────────────────────────────────────────────── */
+
+.lf-fleet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.lf-fleet__ship {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  color: var(--ink);
+  padding: 0.45rem 0.85rem;
+}
+
+.lf-fleet__ship--on {
+  border-color: color-mix(in srgb, var(--lf-gold) 55%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lf-gold) 25%, transparent);
+}
+
+/* ── Contracts ──────────────────────────────────────────────────────────── */
+
+.lf-contracts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.lf-contract {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1.1fr) 1.4fr minmax(7rem, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem 1rem;
+  width: 100%;
+  text-align: left;
+  background: color-mix(in srgb, var(--deeper) 55%, transparent);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  color: var(--ink);
+  padding: 0.7rem 0.9rem;
+  font-weight: 400;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.lf-contract:hover:not(:disabled) {
+  border-color: var(--sea);
+  filter: none;
+  transform: translateY(-1px);
+}
+
+.lf-contract--on {
+  border-color: var(--lf-gold);
+}
+
+.lf-contract:disabled {
+  opacity: 0.5;
+}
+
+.lf-contract__cargo,
+.lf-contract__to,
+.lf-contract__pay {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.lf-contract__pay {
+  text-align: right;
+  align-items: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+.lf-contract__no {
+  grid-column: 1 / -1;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+}
+
+.lf-deadline {
+  justify-self: end;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--lf-gold);
+  border: 1px solid color-mix(in srgb, var(--lf-gold) 50%, transparent);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .lf-contract {
+    grid-template-columns: 1fr auto;
+  }
+  .lf-deadline {
+    grid-column: 1;
+    justify-self: start;
+  }
+}
+
+/* ── Departure planner ──────────────────────────────────────────────────── */
+
+.lf-planner {
+  margin-top: 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--lf-gold) 35%, transparent);
+  border-radius: 10px;
+  padding: 0.9rem;
+  background: color-mix(in srgb, var(--deeper) 70%, transparent);
+}
+
+.lf-planner__via {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.lf-speed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.lf-speed input[type="range"] {
+  accent-color: var(--brass);
+}
+
+.lf-plan-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.lf-plan-facts dt {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-muted);
+}
+
+.lf-plan-facts dd {
+  margin: 0.12rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.lf-warn {
+  color: var(--lf-gold);
+  font-size: 0.88rem;
+  border-left: 3px solid var(--lf-gold);
+  padding-left: 0.6rem;
+}
+
+/* ── Pick chips (ports, options) ────────────────────────────────────────── */
+
+.lf-portpick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.lf-chip {
+  background: transparent;
+  border: 1px solid var(--panel-edge);
+  border-radius: 999px;
+  color: var(--ink-muted);
+  padding: 0.28rem 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.lf-chip--on {
+  color: var(--deeper);
+  background: var(--sea);
+  border-color: transparent;
+  font-weight: 650;
+}
+
+.lf-ballast summary {
+  color: var(--ink-muted);
+}
+
+.lf-ballast > .lf-portpick {
+  margin-top: 0.7rem;
+}
+
+/* ── Offers (setup & shipyard) ──────────────────────────────────────────── */
+
+.lf-offers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15.5rem), 1fr));
+  gap: 0.75rem;
+}
+
+.lf-offer {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  text-align: left;
+  background: color-mix(in srgb, var(--deeper) 55%, transparent);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  color: var(--ink);
+  padding: 0.85rem;
+  font-weight: 400;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+button.lf-offer:hover {
+  border-color: var(--sea);
+  filter: none;
+  transform: translateY(-1px);
+}
+
+.lf-offer--on {
+  border-color: var(--lf-gold);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lf-gold) 30%, transparent);
+}
+
+.lf-offer__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.lf-offer__price {
+  color: var(--lf-gold);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.lf-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  font-size: 0.84rem;
+}
+
+.lf-facts em {
+  font-style: normal;
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-right: 0.35rem;
+}
+
+.lf-condition {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.lf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-width: 26rem;
+}
+
+.lf-field > span {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+
+.lf-setup__port strong {
+  color: var(--lf-gold);
+}
+
+/* ── Ship tab ───────────────────────────────────────────────────────────── */
+
+.lf-shipmeters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.9rem;
+}
+
+.lf-shipmeter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.lf-shipmeter__label {
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+}
+
+.lf-shipmeter__label strong {
+  color: var(--ink);
+}
+
+.lf-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 0.9rem;
+}
+
+.lf-action {
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.lf-action h3 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-muted);
+}
+
+/* ── Log ────────────────────────────────────────────────────────────────── */
+
+.lf-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.lf-log__entry {
+  display: flex;
+  gap: 0.7rem;
+  align-items: baseline;
+  padding: 0.3rem 0;
+  border-bottom: 1px dashed color-mix(in srgb, var(--panel-edge) 60%, transparent);
+}
+
+.lf-log__entry:last-child {
+  border-bottom: none;
+}
+
+.lf-log__day {
+  flex: none;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+  min-width: 2.4rem;
+}
+
+.lf-log__entry--good {
+  color: var(--lf-good);
+}
+
+.lf-log__entry--bad {
+  color: color-mix(in srgb, var(--lf-bad) 85%, white);
+}
+
+/* ── Voyage ─────────────────────────────────────────────────────────────── */
+
+.lf-voyage__day {
+  text-align: right;
+  line-height: 1.1;
+}
+
+.lf-voyage__day span {
+  display: block;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-muted);
+}
+
+.lf-voyage__day strong {
+  font-size: 1.6rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--lf-gold);
+}
+
+.lf-event {
+  border: 1px solid color-mix(in srgb, var(--lf-gold) 45%, transparent);
+  border-radius: 10px;
+  padding: 1rem;
+  background:
+    radial-gradient(120% 100% at 50% 0%, rgba(216, 166, 87, 0.08), transparent 55%),
+    color-mix(in srgb, var(--deeper) 70%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.lf-event h3 {
+  margin: 0;
+  color: var(--lf-gold);
+  letter-spacing: 0.02em;
+}
+
+/* ── Docking ────────────────────────────────────────────────────────────── */
+
+.lf-sim__stage {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--panel-edge);
+  box-shadow: inset 0 0 50px rgba(0, 0, 0, 0.5);
+}
+
+.lf-sim__canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #071119;
+  touch-action: none;
+}
+
+.lf-sim__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  text-align: center;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--deeper) 78%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.lf-sim__verdict {
+  font-size: 1.5rem;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+}
+
+.lf-sim__hud {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.lf-sim__cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.lf-sim__dial {
+  min-width: 6.4rem;
+  text-align: center;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  background: var(--deeper);
+  color: var(--lf-gold);
+}
+
+.lf-sim__readouts {
+  gap: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.lf-sim__readouts em {
+  font-style: normal;
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-right: 0.3rem;
+}
+
+.lf-sim__abort {
+  margin-left: auto;
+}
+
+/* ── Fortunes ───────────────────────────────────────────────────────────── */
+
+.lf-fortunes summary {
+  color: var(--ink-muted);
+}
+
+.lf-scoreboard {
+  margin: 0.7rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  counter-reset: rank;
+}
+
+.lf-scoreboard li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  counter-increment: rank;
+}
+
+.lf-scoreboard li::before {
+  content: counter(rank);
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.2rem;
+}
+
+.lf-scoreboard__value {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--lf-gold);
+  font-weight: 650;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lf-map__route,
+  .lf-map__ship-ring {
+    animation: none;
+  }
+}

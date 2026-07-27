@@ -51,6 +51,93 @@ function project([lon, lat]) {
   ];
 }
 
+// --- Antimeridian handling -------------------------------------------------
+// A few rings (Afro-Eurasia via Chukotka, Fiji, Wrangel Island, Antarctica)
+// cross ±180°. Projected naively they gain a full-width horizontal edge that
+// both draws a hairline across the map and breaks any point-in-polygon test.
+// Unwrap each ring into continuous longitudes, close polar rings over the
+// pole, then clip shifted copies to the [-180, 180] window.
+
+/** Make longitudes continuous: never jump more than 180° between vertices. */
+function unwrap(points) {
+  const out = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    let [lon, lat] = points[i];
+    const prev = out[i - 1][0];
+    while (lon - prev > 180) lon -= 360;
+    while (lon - prev < -180) lon += 360;
+    out.push([lon, lat]);
+  }
+  return out;
+}
+
+function lerpAtLon(a, b, lon) {
+  const t = (lon - a[0]) / (b[0] - a[0]);
+  return [lon, a[1] + (b[1] - a[1]) * t];
+}
+
+/** Sutherland–Hodgman clip of a ring to minLon <= lon <= maxLon. */
+function clipLon(points, minLon, maxLon) {
+  const clipEdge = (pts, keep, boundary) => {
+    const res = [];
+    for (let i = 0; i < pts.length; i++) {
+      const prev = pts[(i + pts.length - 1) % pts.length];
+      const cur = pts[i];
+      if (keep(cur)) {
+        if (!keep(prev)) res.push(lerpAtLon(prev, cur, boundary));
+        res.push(cur);
+      } else if (keep(prev)) {
+        res.push(lerpAtLon(prev, cur, boundary));
+      }
+    }
+    return res;
+  };
+  let pts = clipEdge(points, (p) => p[0] >= minLon, minLon);
+  if (pts.length) pts = clipEdge(pts, (p) => p[0] <= maxLon, maxLon);
+  return pts;
+}
+
+/** Cut one lon/lat ring into ring pieces that all live inside [-180, 180]. */
+function cutRing(rawRing) {
+  // TopoJSON rings repeat the first vertex at the end. Unwrap with the
+  // closing vertex in place: if the ring winds around a pole, the unwrapped
+  // closing vertex ends up a full 360° away from the start.
+  const u = unwrap(rawRing);
+  const winds = Math.abs(u.at(-1)[0] - u[0][0]) > 180;
+  let pts;
+  if (winds) {
+    // Close the polar ring along the pole edge so it becomes a plain polygon.
+    const meanLat = u.reduce((s, p) => s + p[1], 0) / u.length;
+    const poleLat = meanLat < 0 ? -90 : 90;
+    pts = [...u, [u.at(-1)[0], poleLat], [u[0][0], poleLat]];
+  } else {
+    pts = u.slice(0, -1); // drop the closing vertex; rings close implicitly
+  }
+
+  const lons = pts.map((p) => p[0]);
+  const minLon = Math.min(...lons);
+  const maxLon = Math.max(...lons);
+  const pieces = [];
+  const kMin = Math.ceil((-180 - maxLon) / 360);
+  const kMax = Math.floor((180 - minLon) / 360);
+  for (let k = kMin; k <= kMax; k++) {
+    const shifted = pts.map(([lon, lat]) => [lon + k * 360, lat]);
+    const clipped = clipLon(shifted, -180, 180);
+    if (clipped.length >= 3 && Math.abs(shoelace(clipped)) > 1e-6) pieces.push(clipped);
+  }
+  return pieces;
+}
+
+function shoelace(pts) {
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x1, y1] = pts[i];
+    const [x2, y2] = pts[(i + 1) % pts.length];
+    area += x1 * y2 - x2 * y1;
+  }
+  return area / 2;
+}
+
 // objects.land is a GeometryCollection holding a single MultiPolygon.
 const polygons = topology.objects.land.geometries.flatMap((geometry) =>
   geometry.type === "MultiPolygon" ? geometry.arcs : [geometry.arcs],
@@ -59,11 +146,13 @@ const polygons = topology.objects.land.geometries.flatMap((geometry) =>
 let path = "";
 for (const polygon of polygons) {
   for (const rawRing of polygon) {
-    const points = ring(rawRing).map(project);
-    path += points
-      .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`)
-      .join("");
-    path += "Z";
+    for (const piece of cutRing(ring(rawRing))) {
+      const points = piece.map(project);
+      path += points
+        .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`)
+        .join("");
+      path += "Z";
+    }
   }
 }
 

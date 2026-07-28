@@ -6,6 +6,10 @@
  * captain owes the ship is a `pendingEvent` that blocks the next day until
  * `resolveEvent` clears it. All rolls go through the dice state carried in the
  * save, so a reload mid-gale continues the same gale.
+ *
+ * Several ships may be under way at once. Company time (`passDay`) and every
+ * clear passage tick together; a noon report on any hull holds the calendar
+ * until the captain answers it.
  */
 import { Dice } from "./rng";
 import { cargo, port, shipModel } from "./world";
@@ -21,8 +25,11 @@ import {
 } from "./economy";
 import { greatCircleNm, nodePosition, type Route } from "./nav";
 import {
+  arrivalOf,
+  committedContractIds,
   logged,
   replaceShip,
+  voyageOf,
   type Arrival,
   type Contract,
   type LandfallState,
@@ -80,11 +87,40 @@ export function routeTolls(route: Route, dwt: number): number {
   return route.canals.reduce((sum, canal) => sum + canalToll(canal, dwt), 0);
 }
 
+/** The port at the end of a track — where she is bound. */
+export function lastLeg(legs: readonly string[]): string {
+  return legs[legs.length - 1]!;
+}
+
+/** Write a settled passage back over the one this ship was sailing. */
+function withVoyage(state: LandfallState, shipId: string, voyage: Voyage): LandfallState {
+  return {
+    ...state,
+    voyages: state.voyages.map((v) => (v.shipId === shipId ? voyage : v)),
+  };
+}
+
+/** True while any noon report waits — the company calendar does not move. */
+export function dayIsBlocked(state: LandfallState): boolean {
+  return state.voyages.some((voyage) => voyage.pendingEvent !== null);
+}
+
+/** A wound-up company takes no further orders. */
+export function companyIsFinished(state: LandfallState): boolean {
+  return state.phase.kind === "bankrupt";
+}
+
 /**
- * Cast off. Charges tolls, moves the ship to sea and opens the voyage phase.
- * The caller has validated fuel and capacity; this trusts the plan.
+ * Cast off. Charges tolls, moves the ship to sea and records her passage
+ * alongside any others already under way. The caller has validated fuel and
+ * capacity; this trusts the plan.
  */
 export function depart(state: LandfallState, plan: DeparturePlan): LandfallState {
+  if (companyIsFinished(state)) return state;
+  if (plan.ship.port === null || plan.ship.chartered) return state;
+  if (voyageOf(state, plan.ship.id) || arrivalOf(state, plan.ship.id)) return state;
+  if (plan.contract && committedContractIds(state).has(plan.contract.id)) return state;
+
   const tolls = routeTolls(plan.route, shipModel(plan.ship.model).dwt);
   const voyage: Voyage = {
     shipId: plan.ship.id,
@@ -100,10 +136,10 @@ export function depart(state: LandfallState, plan: DeparturePlan): LandfallState
   };
 
   let next = replaceShip(
-    { ...state, cash: state.cash - tolls, phase: { kind: "voyage", voyage } },
+    { ...state, cash: state.cash - tolls, voyages: [...state.voyages, voyage] },
     { ...plan.ship, port: null },
   );
-  const destination = port(plan.route.legs[plan.route.legs.length - 1]!).name;
+  const destination = port(lastLeg(plan.route.legs)).name;
   next = logged(
     next,
     plan.contract
@@ -122,22 +158,28 @@ const STORM_CHANCE = 0.08;
 const RESCUE_CHANCE = 0.022;
 const CURRENT_CHANCE = 0.03;
 
+type VoyageTick = {
+  voyage: Voyage;
+  /** The dice roll is already committed to `state.rng`. */
+  state: LandfallState;
+  /** She made her landfall this tick — the caller puts her in the roads. */
+  arrived: boolean;
+};
+
 /**
- * One day at sea. No-op while a noon report waits for a decision. Consumes
- * fuel, wears the hull, advances the track, then rolls the day's trouble.
- * Arrival flips the phase to docking.
+ * One day at sea for a single hull. Caller has already ticked the company
+ * ledger; this burns fuel, wears the hull, advances the track and may open a
+ * noon report or make her landfall.
+ *
+ * Returns null when the passage has no hull left in the fleet — she cannot be
+ * sailed, so the caller strikes her off rather than tick her forever.
  */
-export function advanceDay(state: LandfallState): LandfallState {
-  if (state.phase.kind !== "voyage" || state.phase.voyage.pendingEvent) return state;
-  const voyage = state.phase.voyage;
+function tickVoyage(state: LandfallState, voyage: Voyage): VoyageTick | null {
   const ship = state.ships.find((s) => s.id === voyage.shipId);
-  if (!ship) return state;
+  if (!ship) return null;
 
   const dice = new Dice(state.rng);
   const model = shipModel(ship.model);
-
-  // The whole company's ledger ticks over first.
-  let next = passDay(state);
 
   const burn = fuelPerDayAt(ship.model, voyage.speed);
   const fuelAfter = Math.max(0, Math.round((ship.fuel - burn) * 10) / 10);
@@ -146,12 +188,9 @@ export function advanceDay(state: LandfallState): LandfallState {
     fuel: fuelAfter,
     condition: Math.max(0, Math.round((ship.condition - 0.15) * 100) / 100),
   };
-  next = replaceShip(next, wornShip);
+  let next = replaceShip(state, wornShip);
 
-  const covered = Math.min(
-    voyage.distanceNm,
-    voyage.coveredNm + voyage.speed * 24,
-  );
+  const covered = Math.min(voyage.distanceNm, voyage.coveredNm + voyage.speed * 24);
   let updated: Voyage = {
     ...voyage,
     dayAtSea: voyage.dayAtSea + 1,
@@ -162,12 +201,12 @@ export function advanceDay(state: LandfallState): LandfallState {
   if (fuelAfter <= 0 && covered < voyage.distanceNm) {
     const cost = Math.round(40_000 + model.dwt * 1.5);
     updated = { ...updated, pendingEvent: { kind: "fuel", cost } };
-    next = { ...next, rng: dice.state, phase: { kind: "voyage", voyage: updated } };
-    return logged(next, `${ship.name} has burned her last ton of bunkers.`, "bad");
+    next = logged(next, `${ship.name} has burned her last ton of bunkers.`, "bad");
+    return { voyage: updated, state: { ...next, rng: dice.state }, arrived: false };
   }
 
   if (covered >= voyage.distanceNm) {
-    return arrive({ ...next, rng: dice.state, phase: { kind: "voyage", voyage: updated } });
+    return { voyage: updated, state: { ...next, rng: dice.state }, arrived: true };
   }
 
   // One noon report a day, worst news first.
@@ -204,8 +243,66 @@ export function advanceDay(state: LandfallState): LandfallState {
   }
 
   updated = { ...updated, pendingEvent: pending };
-  next = { ...next, rng: dice.state, phase: { kind: "voyage", voyage: updated } };
-  return logText ? logged(next, logText, tone) : next;
+  if (logText) next = logged(next, logText, tone);
+  return { voyage: updated, state: { ...next, rng: dice.state }, arrived: false };
+}
+
+/**
+ * She has made her landfall: off the passage list, into the roads. Reads the
+ * dice from `state.rng` so there is only ever one of them in play.
+ */
+function putInRoads(state: LandfallState, voyage: Voyage): LandfallState {
+  const dice = new Dice(state.rng);
+  const portId = lastLeg(voyage.legs);
+  const arrival: Arrival = {
+    shipId: voyage.shipId,
+    portId,
+    contract: voyage.contract,
+    lostTons: voyage.lostTons,
+    tugStrike: dice.chance(0.1),
+  };
+
+  const next: LandfallState = {
+    ...state,
+    rng: dice.state,
+    voyages: state.voyages.filter((v) => v.shipId !== voyage.shipId),
+    arrivals: [...state.arrivals.filter((a) => a.shipId !== voyage.shipId), arrival],
+    stats: {
+      ...state.stats,
+      milesSailed: Math.round(state.stats.milesSailed + voyage.distanceNm),
+    },
+  };
+  return logged(
+    next,
+    `${port(portId).name} roads. ${arrival.tugStrike ? "The tugs are on strike — she goes in by hand." : "Pilot aboard, berth assigned."}`,
+  );
+}
+
+/**
+ * One day for the whole company: ledger, then every clear passage. No-op while
+ * a noon report waits for a decision. Ships that make port join `arrivals`.
+ */
+export function advanceDay(state: LandfallState): LandfallState {
+  if (companyIsFinished(state)) return state;
+  if (dayIsBlocked(state)) return state;
+
+  // Start the day with an empty passage list and rebuild it as each hull ticks;
+  // the ones that make port land in `arrivals` instead.
+  let next: LandfallState = { ...passDay(state), voyages: [] };
+
+  for (const voyage of state.voyages) {
+    const tick = tickVoyage(next, voyage);
+    if (!tick) {
+      const bound = port(lastLeg(voyage.legs)).name;
+      next = logged(next, `${bound} passage struck off — no ship.`, "bad");
+      continue;
+    }
+    next = tick.arrived
+      ? putInRoads(tick.state, tick.voyage)
+      : { ...tick.state, voyages: [...tick.state.voyages, tick.voyage] };
+  }
+
+  return next;
 }
 
 export type EventChoice =
@@ -217,16 +314,22 @@ export type EventChoice =
   | "sail-past"
   | "acknowledge";
 
-/** Settle the pending noon report and free the next day. */
-export function resolveEvent(state: LandfallState, choice: EventChoice): LandfallState {
-  if (state.phase.kind !== "voyage") return state;
-  const voyage = state.phase.voyage;
-  const event = voyage.pendingEvent;
-  const ship = state.ships.find((s) => s.id === voyage.shipId);
-  if (!event || !ship) return state;
+/**
+ * Settle the pending noon report on a ship and free the company calendar.
+ * `shipId` is explicit: with a fleet under way, the ship that needs the captain
+ * is often not the one under command.
+ */
+export function resolveEvent(
+  state: LandfallState,
+  choice: EventChoice,
+  shipId: string,
+): LandfallState {
+  const voyage = voyageOf(state, shipId);
+  const event = voyage?.pendingEvent;
+  const ship = state.ships.find((s) => s.id === shipId);
+  if (!voyage || !event || !ship) return state;
 
   const dice = new Dice(state.rng);
-  const model = shipModel(ship.model);
   let next = state;
   let updated: Voyage = { ...voyage, pendingEvent: null };
 
@@ -341,43 +444,13 @@ export function resolveEvent(state: LandfallState, choice: EventChoice): Landfal
         "bad",
       );
       updated = { ...updated, coveredNm: voyage.distanceNm };
-      next = { ...next, rng: dice.state, phase: { kind: "voyage", voyage: updated } };
-      return arrive(next);
+      // Straight into the roads — no point writing her back onto the passage
+      // list that `putInRoads` is about to take her off.
+      return putInRoads({ ...next, rng: dice.state }, updated);
     }
   }
 
-  return { ...next, rng: dice.state, phase: { kind: "voyage", voyage: updated } };
-}
-
-// ── Arrival ──────────────────────────────────────────────────────────────────
-
-function arrive(state: LandfallState): LandfallState {
-  if (state.phase.kind !== "voyage") return state;
-  const voyage = state.phase.voyage;
-  const dice = new Dice(state.rng);
-  const portId = voyage.legs[voyage.legs.length - 1]!;
-
-  const arrival: Arrival = {
-    shipId: voyage.shipId,
-    portId,
-    contract: voyage.contract,
-    lostTons: voyage.lostTons,
-    tugStrike: dice.chance(0.1),
-  };
-
-  const next: LandfallState = {
-    ...state,
-    rng: dice.state,
-    stats: {
-      ...state.stats,
-      milesSailed: Math.round(state.stats.milesSailed + voyage.distanceNm),
-    },
-    phase: { kind: "docking", arrival },
-  };
-  return logged(
-    next,
-    `${port(portId).name} roads. ${arrival.tugStrike ? "The tugs are on strike — she goes in by hand." : "Pilot aboard, berth assigned."}`,
-  );
+  return withVoyage({ ...next, rng: dice.state }, shipId, updated);
 }
 
 // ── Berthing & delivery ──────────────────────────────────────────────────────
@@ -398,15 +471,18 @@ export type DockingOutcome = {
 export function completeArrival(
   state: LandfallState,
   outcome: DockingOutcome,
+  shipId: string,
 ): LandfallState {
-  if (state.phase.kind !== "docking") return state;
-  const arrival = state.phase.arrival;
-  const ship = state.ships.find((s) => s.id === arrival.shipId);
-  if (!ship) return state;
+  const arrival = arrivalOf(state, shipId);
+  const ship = state.ships.find((s) => s.id === shipId);
+  if (!arrival || !ship || companyIsFinished(state)) return state;
 
   const here = port(arrival.portId);
   const model = shipModel(ship.model);
-  let next = state;
+  let next: LandfallState = {
+    ...state,
+    arrivals: state.arrivals.filter((a) => a.shipId !== shipId),
+  };
   let cash = state.cash;
   let reputation = state.reputation;
 
@@ -464,7 +540,7 @@ export function completeArrival(
   }
 
   next = replaceShip(
-    { ...next, cash: Math.round(cash), reputation, stats, phase: { kind: "port" } },
+    { ...next, cash: Math.round(cash), reputation, stats },
     berthed,
   );
 

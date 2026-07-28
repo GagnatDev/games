@@ -239,28 +239,31 @@ export function refuel(state: LandfallState, shipId: string, tons: number): Land
   );
 }
 
-/**
- * Yard work: money per point, and a day in dock per 12 points started. The
- * days pass through the ledger like any others.
- */
-export function repair(state: LandfallState, shipId: string, points: number): LandfallState {
-  const ship = state.ships.find((s) => s.id === shipId);
-  if (!ship || ship.port === null) return state;
-  const model = shipModel(ship.model);
-  const fixed = Math.min(points, 100 - ship.condition);
-  if (fixed <= 0) return state;
-  const cost = fixed * repairCostPerPoint(model);
-  const days = Math.ceil(fixed / 12);
+export type YardJob = {
+  ship: Ship;
+  /** Condition points the yard will actually put back. */
+  points: number;
+  cost: number;
+  /** A day in dock per 12 points started. */
+  days: number;
+};
 
-  let next = replaceShip(
-    { ...state, cash: state.cash - cost },
-    { ...ship, condition: Math.round((ship.condition + fixed) * 10) / 10 },
-  );
-  for (let i = 0; i < days; i += 1) next = passDay(next);
-  return logged(
-    next,
-    `${ship.name} spent ${days} ${days === 1 ? "day" : "days"} in the yard — condition ${Math.round(ship.condition + fixed)}%.`,
-  );
+/**
+ * What the yard would charge for this ship and how long she would be out of
+ * service — null if there is no yard work to do here. Quoting only: spending
+ * the days is `calendar.ts`, which is the layer that can see ships at sea.
+ */
+export function yardJob(state: LandfallState, shipId: string, points: number): YardJob | null {
+  const ship = state.ships.find((s) => s.id === shipId);
+  if (!ship || ship.port === null) return null;
+  const fixed = Math.min(points, 100 - ship.condition);
+  if (fixed <= 0) return null;
+  return {
+    ship,
+    points: fixed,
+    cost: fixed * repairCostPerPoint(shipModel(ship.model)),
+    days: Math.ceil(fixed / 12),
+  };
 }
 
 export function buyShip(
@@ -365,11 +368,6 @@ export function passDay(state: LandfallState): LandfallState {
   cash -= Math.round(state.loan * LOAN_DAILY_INTEREST);
 
   return { ...state, day: state.day + 1, cash: Math.round(cash), ships };
-}
-
-/** Wait out a day in port for fresh cargo on the boards. */
-export function waitDay(state: LandfallState): LandfallState {
-  return passDay(state);
 }
 
 /** The company is finished when everything it owns cannot cover the debt. */

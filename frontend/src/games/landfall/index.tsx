@@ -6,6 +6,7 @@ import { ApiError, SessionExpiredError, api } from "../../api/client";
 import { netWorth } from "./economy";
 import {
   STATE_VERSION,
+  bridgeView,
   parseState,
   type LandfallState,
   type Stats,
@@ -152,7 +153,9 @@ export default function Landfall() {
       if (next === current) return;
       setNotice(null);
       adopt(next, null);
-      queueSave(next, immediate || next.phase.kind !== current.phase.kind);
+      // Flush rather than debounce whenever the bridge changes screens. A
+      // bankrupt phase always changes the view, so that case is covered too.
+      queueSave(next, immediate || bridgeView(next) !== bridgeView(current));
     },
     [adopt, queueSave],
   );
@@ -310,6 +313,7 @@ export default function Landfall() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const showSetup = phase === "ready" && (founding || (!state && !problem));
+  const view = state ? bridgeView(state) : null;
 
   return (
     <section className="stack lf">
@@ -359,16 +363,14 @@ export default function Landfall() {
             <>
               <StatusBar state={state} />
 
-              {state.phase.kind === "port" && <PortScreen state={state} apply={apply} />}
-              {state.phase.kind === "voyage" && <VoyageScreen state={state} apply={apply} />}
-              {state.phase.kind === "docking" && <DockingScreen state={state} apply={apply} />}
-              {state.phase.kind === "bankrupt" && (
+              {view === "port" && <PortScreen state={state} apply={apply} />}
+              {view === "voyage" && <VoyageScreen state={state} apply={apply} />}
+              {view === "docking" && <DockingScreen state={state} apply={apply} />}
+              {view === "bankrupt" && (
                 <GameOverScreen state={state} onFoundAgain={() => setFounding(true)} />
               )}
 
-              {(state.phase.kind === "port" || state.phase.kind === "bankrupt") && (
-                <Fortunes scores={scores} />
-              )}
+              {(view === "port" || view === "bankrupt") && <Fortunes scores={scores} />}
 
               <p className="muted small" data-testid="lf-save-status" aria-live="polite">
                 {saveStatus === "saving" && "Saving…"}

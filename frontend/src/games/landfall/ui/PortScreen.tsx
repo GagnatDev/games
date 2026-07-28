@@ -11,7 +11,6 @@ import {
   freightMarket,
   maxLoan,
   refuel,
-  repair,
   repairCostPerPoint,
   repayLoan,
   sellShip,
@@ -19,11 +18,25 @@ import {
   shipValue,
   shipyard,
   takeLoan,
-  waitDay,
 } from "../economy";
-import { canCarry, depart, effectiveMaxSpeed, estimateVoyage } from "../voyage";
-import { activeShip, type Contract, type LandfallState, type Ship } from "../state";
+import {
+  advanceDay,
+  canCarry,
+  dayIsBlocked,
+  depart,
+  effectiveMaxSpeed,
+  estimateVoyage,
+} from "../voyage";
+import { repair } from "../calendar";
+import {
+  activeShip,
+  committedContractIds,
+  type Contract,
+  type LandfallState,
+  type Ship,
+} from "../state";
 import { WorldMap } from "./WorldMap";
+import { FleetStrip } from "./FleetStrip";
 import { days, knots, money, nm, tons } from "./format";
 
 export type Apply = (
@@ -32,6 +45,9 @@ export type Apply = (
 ) => void;
 
 type Tab = "market" | "ship" | "yard" | "bank" | "log";
+
+/** Why a day cannot be spent right now — shown wherever one is on offer. */
+const CLOCK_HELD = "A ship under way needs the captain before the day can turn.";
 
 /**
  * Life alongside: the freight market, the ship's own business, the yard, the
@@ -54,7 +70,10 @@ export function PortScreen({ state, apply }: { state: LandfallState; apply: Appl
   const here = ship.port;
   if (here === null) return null; // voyage phase owns this ship
 
-  const market = freightMarket(state, here);
+  // A lot another hull is already carrying is off the board.
+  const committed = committedContractIds(state);
+  const market = freightMarket(state, here).filter((contract) => !committed.has(contract.id));
+  const blocked = dayIsBlocked(state);
   const planContract: Contract | null =
     planKey === "ballast" ? null : (market.find((c) => c.id === planKey) ?? null);
   const destination = planKey === "ballast" ? ballastTo : (planContract?.to ?? null);
@@ -110,14 +129,17 @@ export function PortScreen({ state, apply }: { state: LandfallState; apply: Appl
               <h2>{port(here).name} freight market</h2>
               <p className="muted small">
                 Day {state.day}. New offers post every morning.
+                {blocked && " A noon report elsewhere is holding the clock."}
               </p>
             </div>
             <button
               type="button"
               className="ghost"
+              disabled={blocked}
+              title={blocked ? CLOCK_HELD : undefined}
               onClick={() => {
                 resetPlan();
-                apply(waitDay);
+                apply(advanceDay);
               }}
             >
               Wait a day
@@ -403,49 +425,6 @@ function canalNames(route: Route, around: Route | null): string {
   return `${[...new Set(names)].join(" & ")} — ${nm(route.distanceNm)}`;
 }
 
-// ── Fleet strip ──────────────────────────────────────────────────────────────
-
-function FleetStrip({
-  state,
-  apply,
-  onSwitch,
-}: {
-  state: LandfallState;
-  apply: Apply;
-  onSwitch: () => void;
-}) {
-  if (state.ships.length === 0) return null;
-  return (
-    <div className="lf-fleet" role="tablist" aria-label="Fleet">
-      {state.ships.map((ship) => {
-        const on = ship.id === state.activeShipId;
-        return (
-          <button
-            key={ship.id}
-            type="button"
-            role="tab"
-            aria-selected={on}
-            className={`lf-fleet__ship${on ? " lf-fleet__ship--on" : ""}`}
-            onClick={() => {
-              onSwitch();
-              apply((s) => ({ ...s, activeShipId: ship.id }));
-            }}
-          >
-            <strong>{ship.name}</strong>
-            <span className="muted small">
-              {ship.chartered
-                ? "on charter"
-                : ship.port
-                  ? `in ${port(ship.port).name}`
-                  : "at sea"}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 // ── Ship tab ─────────────────────────────────────────────────────────────────
 
 function ShipTab({
@@ -463,6 +442,7 @@ function ShipTab({
   const perPoint = repairCostPerPoint(model);
   const toFix = Math.round(100 - ship.condition);
   const value = shipValue(model, ship.condition);
+  const blocked = dayIsBlocked(state);
 
   return (
     <section className="card lf-panel stack" aria-label="Ship">
@@ -529,19 +509,24 @@ function ShipTab({
             <button
               type="button"
               className="ghost"
-              disabled={toFix <= 0}
+              disabled={toFix <= 0 || blocked}
+              title={blocked ? CLOCK_HELD : undefined}
               onClick={() => apply((s) => repair(s, ship.id, Math.min(12, toFix)))}
             >
               Patch +12 ({money(Math.min(12, toFix) * perPoint)})
             </button>
             <button
               type="button"
-              disabled={toFix <= 0}
+              disabled={toFix <= 0 || blocked}
+              title={blocked ? CLOCK_HELD : undefined}
               onClick={() => apply((s) => repair(s, ship.id, toFix))}
             >
               Full refit ({money(toFix * perPoint)})
             </button>
           </div>
+          {blocked && toFix > 0 && (
+            <p className="lf-warn">The yard bills in days — {CLOCK_HELD}</p>
+          )}
         </div>
 
         <div className="lf-action">

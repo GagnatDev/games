@@ -103,16 +103,19 @@ export const arrivalSchema = z
 
 export type Arrival = z.infer<typeof arrivalSchema>;
 
+/** The end of the company — shared by every state version, past and present. */
+const bankruptPhaseSchema = z
+  .object({
+    kind: z.literal("bankrupt"),
+    day: z.number().int().positive(),
+    finalNetWorth: z.number(),
+  })
+  .strict();
+
 const phaseSchema = z.discriminatedUnion("kind", [
   /** The company is trading; each ship's berth / voyage / arrival is its own. */
   z.object({ kind: z.literal("operating") }).strict(),
-  z
-    .object({
-      kind: z.literal("bankrupt"),
-      day: z.number().int().positive(),
-      finalNetWorth: z.number(),
-    })
-    .strict(),
+  bankruptPhaseSchema,
 ]);
 
 export type Phase = z.infer<typeof phaseSchema>;
@@ -178,32 +181,18 @@ const v2PhaseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("port") }).strict(),
   z.object({ kind: z.literal("voyage"), voyage: voyageSchema }).strict(),
   z.object({ kind: z.literal("docking"), arrival: arrivalSchema }).strict(),
-  z
-    .object({
-      kind: z.literal("bankrupt"),
-      day: z.number().int().positive(),
-      finalNetWorth: z.number(),
-    })
-    .strict(),
+  bankruptPhaseSchema,
 ]);
 
-const v2StateSchema = z
-  .object({
-    version: z.literal(2),
-    company: z.string().min(1),
-    homePort: z.string(),
-    day: z.number().int().positive(),
-    cash: z.number(),
-    loan: z.number().nonnegative(),
-    reputation: z.number().min(0).max(100),
-    seed: z.number().int().nonnegative(),
-    rng: z.number().int().nonnegative(),
-    ships: z.array(shipSchema),
-    activeShipId: z.string().nullable(),
-    phase: v2PhaseSchema,
-    log: z.array(logEntrySchema).max(MAX_LOG),
-    stats: statsSchema,
-  })
+/**
+ * v2 is v3 minus the fleet lists, plus the old phase. Deriving it keeps the
+ * twelve fields the two versions share in exactly one place, so tightening a
+ * constraint on the current schema cannot leave the migration accepting saves
+ * the game would reject.
+ */
+const v2StateSchema = landfallStateSchema
+  .omit({ version: true, voyages: true, arrivals: true, phase: true })
+  .extend({ version: z.literal(2), phase: v2PhaseSchema })
   .strict();
 
 // ── Constructors & helpers ───────────────────────────────────────────────────
@@ -287,64 +276,46 @@ export function arrivalOf(state: LandfallState, shipId: string): Arrival | undef
   return state.arrivals.find((arrival) => arrival.shipId === shipId);
 }
 
+/**
+ * Which of the four screens the bridge shows. Three of the names match their
+ * components exactly; `"port"` is free again now that v3 has dropped the
+ * company-wide `port` phase.
+ */
+export type BridgeView = "port" | "voyage" | "docking" | "bankrupt";
+
 /** What the bridge should show for the ship under command. */
-export function activeFocus(
-  state: LandfallState,
-): "operating" | "voyage" | "docking" | "bankrupt" {
+export function bridgeView(state: LandfallState): BridgeView {
   if (state.phase.kind === "bankrupt") return "bankrupt";
   const shipId = state.activeShipId;
-  if (shipId && arrivalOf(state, shipId)) return "docking";
-  if (shipId && voyageOf(state, shipId)) return "voyage";
-  return "operating";
+  if (shipId === null) return "port";
+  if (arrivalOf(state, shipId)) return "docking";
+  if (voyageOf(state, shipId)) return "voyage";
+  return "port";
 }
 
-/** Contract ids already spoken for by ships under way or in the roads. */
+/**
+ * Contract ids already spoken for by ships under way or in the roads. Builds a
+ * fresh set on each call — hoist it out of loops rather than calling per item.
+ */
 export function committedContractIds(state: LandfallState): ReadonlySet<string> {
-  const ids = new Set<string>();
-  for (const voyage of state.voyages) {
-    if (voyage.contract) ids.add(voyage.contract.id);
-  }
-  for (const arrival of state.arrivals) {
-    if (arrival.contract) ids.add(arrival.contract.id);
-  }
-  return ids;
+  const committed = [...state.voyages, ...state.arrivals]
+    .map((passage) => passage.contract?.id)
+    .filter((id): id is string => id !== undefined);
+  return new Set(committed);
 }
 
 function migrateV2(raw: unknown): LandfallState | null {
   const parsed = v2StateSchema.safeParse(raw);
   if (!parsed.success) return null;
-  const v2 = parsed.data;
-  let voyages: Voyage[] = [];
-  let arrivals: Arrival[] = [];
-  let phase: Phase;
-  if (v2.phase.kind === "voyage") {
-    voyages = [v2.phase.voyage];
-    phase = { kind: "operating" };
-  } else if (v2.phase.kind === "docking") {
-    arrivals = [v2.phase.arrival];
-    phase = { kind: "operating" };
-  } else if (v2.phase.kind === "bankrupt") {
-    phase = v2.phase;
-  } else {
-    phase = { kind: "operating" };
-  }
+  const { phase, ...carried } = parsed.data;
+
+  // Only these four fields move between versions; everything else carries over.
   return {
+    ...carried,
     version: STATE_VERSION,
-    company: v2.company,
-    homePort: v2.homePort,
-    day: v2.day,
-    cash: v2.cash,
-    loan: v2.loan,
-    reputation: v2.reputation,
-    seed: v2.seed,
-    rng: v2.rng,
-    ships: v2.ships,
-    activeShipId: v2.activeShipId,
-    voyages,
-    arrivals,
-    phase,
-    log: v2.log,
-    stats: v2.stats,
+    voyages: phase.kind === "voyage" ? [phase.voyage] : [],
+    arrivals: phase.kind === "docking" ? [phase.arrival] : [],
+    phase: phase.kind === "bankrupt" ? phase : { kind: "operating" },
   };
 }
 

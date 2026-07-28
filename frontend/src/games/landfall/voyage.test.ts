@@ -5,6 +5,7 @@ import { newGameState, type Contract, type LandfallState, type Ship } from "./st
 import {
   advanceDay,
   canCarry,
+  companyIsFinished,
   completeArrival,
   dayIsBlocked,
   depart,
@@ -31,10 +32,11 @@ function company(cash = 1_000_000): LandfallState {
   });
 }
 
-function secondShip(state: LandfallState, id = "s2"): Ship {
+/** A sister ship lying alongside in `company()`'s home port. */
+function secondShip(id = "s2", name = "Petrel"): Ship {
   return {
     id,
-    name: "Petrel",
+    name,
     model: "tramp",
     condition: 80,
     fuel: 280,
@@ -42,6 +44,12 @@ function secondShip(state: LandfallState, id = "s2"): Ship {
     chartered: false,
     boughtDay: 1,
   };
+}
+
+/** `company()` plus however many sister ships the test needs. */
+function fleet(ships: Ship[], cash = 1_000_000): LandfallState {
+  const state = company(cash);
+  return { ...state, ships: [...state.ships, ...ships] };
 }
 
 function contractTo(to: string, tons = 6000, id = "c1"): Contract {
@@ -57,14 +65,19 @@ function contractTo(to: string, tons = 6000, id = "c1"): Contract {
   };
 }
 
-function sail(state: LandfallState, ship = state.ships[0]!, to = "london", contractId = "c1"): LandfallState {
-  const from = ship.port ?? "rotterdam";
-  const route = shortestRoute(from, to)!;
+/** Cast off. Named options because four bare strings in a row read as noise. */
+function sail(
+  state: LandfallState,
+  opts: { ship?: Ship; to?: string; contractId?: string; speed?: number } = {},
+): LandfallState {
+  const ship = opts.ship ?? state.ships[0]!;
+  const to = opts.to ?? "london";
+  const route = shortestRoute(ship.port ?? "rotterdam", to)!;
   return depart(state, {
     ship,
-    contract: contractTo(to, 6000, contractId),
+    contract: contractTo(to, 6000, opts.contractId ?? "c1"),
     route,
-    speed: 12,
+    speed: opts.speed ?? 12,
   });
 }
 
@@ -99,6 +112,37 @@ describe("planning", () => {
     expect(
       canCarry(state.ships[0]!, { ...contractTo("london"), cargo: "crude-oil" }),
     ).toMatch(/no hold/);
+  });
+});
+
+describe("a wound-up company", () => {
+  const wound = (state: LandfallState): LandfallState => ({
+    ...state,
+    phase: { kind: "bankrupt", day: state.day, finalNetWorth: -1 },
+  });
+
+  it("is finished, and takes no further orders", () => {
+    const state = wound(company());
+    expect(companyIsFinished(state)).toBe(true);
+    expect(sail(state)).toBe(state);
+    expect(advanceDay(state)).toBe(state);
+  });
+
+  it("will not berth a ship already in the roads", () => {
+    let state = sail(company());
+    for (let i = 0; i < 60 && state.voyages.length > 0; i += 1) {
+      state = state.voyages[0]?.pendingEvent
+        ? resolveEvent(state, "heave-to", "s1")
+        : advanceDay(state);
+    }
+    expect(state.arrivals).toHaveLength(1);
+    const finished = wound(state);
+    const outcome = { method: "tug", damage: 0, emergencyTow: false } as const;
+    expect(completeArrival(finished, outcome, "s1")).toBe(finished);
+  });
+
+  it("is still trading while it is solvent", () => {
+    expect(companyIsFinished(company())).toBe(false);
   });
 });
 
@@ -249,17 +293,16 @@ describe("the whole passage", () => {
 
 describe("parallel freights", () => {
   it("lets a second ship cast off while the first is still at sea", () => {
-    let state = company();
-    state = { ...state, ships: [...state.ships, secondShip(state)] };
+    let state = fleet([secondShip()]);
 
-    state = sail(state, state.ships[0]!, "new-york", "c-a");
+    state = sail(state, { ship: state.ships[0]!, to: "new-york", contractId: "c-a" });
     expect(state.voyages).toHaveLength(1);
     expect(state.ships[0]!.port).toBeNull();
     expect(state.ships[1]!.port).toBe("rotterdam");
 
     // Switch command and take another contract out of the same port.
     state = { ...state, activeShipId: "s2" };
-    state = sail(state, state.ships[1]!, "london", "c-b");
+    state = sail(state, { ship: state.ships[1]!, to: "london", contractId: "c-b" });
 
     expect(state.phase.kind).toBe("operating");
     expect(state.voyages).toHaveLength(2);
@@ -267,10 +310,9 @@ describe("parallel freights", () => {
   });
 
   it("advances every ship under way on the same company day", () => {
-    let state = company();
-    state = { ...state, ships: [...state.ships, secondShip(state)] };
-    state = sail(state, state.ships[0]!, "new-york", "c-a");
-    state = sail(state, state.ships[1]!, "singapore", "c-b");
+    let state = fleet([secondShip()]);
+    state = sail(state, { ship: state.ships[0]!, to: "new-york", contractId: "c-a" });
+    state = sail(state, { ship: state.ships[1]!, to: "singapore", contractId: "c-b" });
 
     const next = advanceDay(state);
     expect(next.day).toBe(state.day + 1);
@@ -282,8 +324,7 @@ describe("parallel freights", () => {
   });
 
   it("refuses the same market lot twice", () => {
-    let state = company();
-    state = { ...state, ships: [...state.ships, secondShip(state)] };
+    let state = fleet([secondShip()]);
     const lot = contractTo("london", 6000, "shared");
     const route = shortestRoute("rotterdam", "london")!;
 
@@ -301,5 +342,106 @@ describe("parallel freights", () => {
     });
     expect(again.voyages).toHaveLength(1);
     expect(again).toBe(state);
+  });
+
+  /**
+   * Two hulls making port on one tick is the path the day loop is easiest to
+   * get wrong: each arrival rolls for a tug strike, and both rolls have to come
+   * off the same advancing dice rather than the value the day started with.
+   */
+  it("puts two ships that make port on the same day into the roads", () => {
+    let state = fleet([secondShip()]);
+    state = sail(state, { ship: state.ships[0]!, to: "london", contractId: "c-a" });
+    state = sail(state, { ship: state.ships[1]!, to: "london", contractId: "c-b" });
+    expect(state.voyages).toHaveLength(2);
+
+    // Rotterdam–London is one short hop, so both arrive on the first tick.
+    const next = advanceDay(state);
+    expect(next.voyages).toEqual([]);
+    expect(next.arrivals).toHaveLength(2);
+    expect(next.arrivals.map((a) => a.shipId).sort()).toEqual(["s1", "s2"]);
+    expect(next.arrivals.every((a) => a.portId === "london")).toBe(true);
+    // Both passages counted, not just the last one home.
+    expect(next.stats.milesSailed).toBe(
+      Math.round(state.voyages[0]!.distanceNm + state.voyages[1]!.distanceNm),
+    );
+  });
+
+  /**
+   * Two identical sisters on the same passage: nothing but the dice can tell
+   * them apart. If the day loop replayed the day's opening roll for every hull
+   * instead of threading one advancing dice through them, they would report the
+   * same weather and cover the same ground forever.
+   */
+  it("gives each hull its own rolls rather than replaying the day's dice", () => {
+    const twin: Ship = { ...secondShip("s2", "Kestrel II"), condition: 85, fuel: 280 };
+    let state = fleet([twin]);
+    state = sail(state, { ship: state.ships[0]!, to: "singapore", contractId: "c-a" });
+    state = sail(state, { ship: state.ships[1]!, to: "singapore", contractId: "c-b" });
+    expect(state.voyages).toHaveLength(2);
+
+    for (let day = 0; day < 30; day += 1) {
+      // Answer nothing — clear both reports so the calendar keeps turning.
+      state = {
+        ...state,
+        voyages: state.voyages.map((v) => ({ ...v, pendingEvent: null })),
+      };
+      state = advanceDay(state);
+      if (state.voyages.length < 2) break;
+      const [a, b] = state.voyages;
+      if (a!.coveredNm !== b!.coveredNm) return;
+      if (a!.pendingEvent?.kind !== b!.pendingEvent?.kind) return;
+    }
+    throw new Error("the sisters never diverged — the hulls appear to share one roll");
+  });
+
+  it("sails one hull on while a sister is already in the roads", () => {
+    let state = fleet([secondShip()]);
+    state = sail(state, { ship: state.ships[0]!, to: "london", contractId: "c-a" });
+    state = sail(state, { ship: state.ships[1]!, to: "new-york", contractId: "c-b" });
+
+    const next = advanceDay(state);
+    expect(next.arrivals.map((a) => a.shipId)).toEqual(["s1"]);
+    expect(next.voyages.map((v) => v.shipId)).toEqual(["s2"]);
+    expect(next.voyages[0]!.dayAtSea).toBe(1);
+
+    // The long passage keeps ticking on later days without disturbing the
+    // roads. Clear any noon report first — one open report holds the fleet.
+    const clear = { ...next, voyages: next.voyages.map((v) => ({ ...v, pendingEvent: null })) };
+    const later = advanceDay(clear);
+    expect(later.arrivals.map((a) => a.shipId)).toEqual(["s1"]);
+    expect(later.voyages[0]!.dayAtSea).toBe(2);
+  });
+
+  it("advances the fleet deterministically from the same save", () => {
+    let state = fleet([secondShip()]);
+    state = sail(state, { ship: state.ships[0]!, to: "new-york", contractId: "c-a" });
+    state = sail(state, { ship: state.ships[1]!, to: "singapore", contractId: "c-b" });
+    expect(advanceDay(state)).toEqual(advanceDay(state));
+  });
+
+  it("leaves the ship under command alone when another casts off", () => {
+    // Casting off is not a change of command; the bridge decides what it shows.
+    let state = fleet([secondShip()]);
+    expect(state.activeShipId).toBe("s1");
+    state = sail(state, { ship: state.ships[1]!, to: "london", contractId: "c-b" });
+    expect(state.voyages.map((v) => v.shipId)).toEqual(["s2"]);
+    expect(state.activeShipId).toBe("s1");
+  });
+
+  it("strikes off a passage whose hull has left the fleet", () => {
+    let state = fleet([secondShip()]);
+    state = sail(state, { ship: state.ships[0]!, to: "new-york", contractId: "c-a" });
+    state = sail(state, { ship: state.ships[1]!, to: "singapore", contractId: "c-b" });
+
+    // Sell the second ship out from under her passage.
+    state = { ...state, ships: state.ships.filter((s) => s.id !== "s2") };
+
+    const next = advanceDay(state);
+    expect(next.voyages.map((v) => v.shipId)).toEqual(["s1"]);
+    expect(next.log.some((entry) => entry.text.includes("struck off"))).toBe(true);
+
+    // And she stays struck off rather than reappearing every day.
+    expect(advanceDay(next).voyages.map((v) => v.shipId)).toEqual(["s1"]);
   });
 });

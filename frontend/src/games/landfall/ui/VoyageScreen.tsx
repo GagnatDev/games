@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { cargo, port, shipModel } from "../world";
 import { positionAlong, type Route } from "../nav";
-import { advanceDay, fuelPerDayAt, resolveEvent, type EventChoice } from "../voyage";
+import {
+  advanceDay,
+  dayIsBlocked,
+  fuelPerDayAt,
+  lastLeg,
+  resolveEvent,
+  type EventChoice,
+} from "../voyage";
 import { voyageOf, type LandfallState, type PendingEvent, type Voyage } from "../state";
 import type { Apply } from "./PortScreen";
 import { WorldMap } from "./WorldMap";
@@ -36,7 +43,7 @@ function VoyageView({
 }) {
   const ship = state.ships.find((s) => s.id === voyage.shipId)!;
   const model = shipModel(ship.model);
-  const destination = voyage.legs[voyage.legs.length - 1]!;
+  const destination = lastLeg(voyage.legs);
   const origin = voyage.legs[0]!;
 
   const route: Route = {
@@ -65,16 +72,17 @@ function VoyageView({
     };
   }, [sailing, apply]);
 
+  // One open noon report anywhere in the fleet holds the company calendar.
+  const fleetHeld = dayIsBlocked(state);
+  // ...and if it is not this hull's report, it can only be answered elsewhere.
+  const heldByAnotherShip = fleetHeld && !voyage.pendingEvent;
+
   useEffect(() => {
-    // Any noon report holds the fleet clock — stop the automatic run.
-    if (state.voyages.some((v) => v.pendingEvent) && sailing) setSailing(false);
-  }, [state.voyages, sailing]);
+    if (fleetHeld && sailing) setSailing(false);
+  }, [fleetHeld, sailing]);
 
   const eta = state.day + daysLeft;
   const deadline = voyage.contract?.deadlineDay ?? null;
-  const otherNeedsCaptain = state.voyages.some(
-    (v) => v.shipId !== voyage.shipId && v.pendingEvent,
-  );
 
   return (
     <div className="lf-voyage stack">
@@ -147,7 +155,7 @@ function VoyageView({
           )}
         </dl>
 
-        {otherNeedsCaptain && !voyage.pendingEvent && (
+        {heldByAnotherShip && (
           <p className="lf-warn">
             Another ship needs the captain before the fleet can sail on. Switch
             hulls on the strip above.
@@ -167,7 +175,7 @@ function VoyageView({
             <button
               type="button"
               className="lf-primary"
-              disabled={otherNeedsCaptain}
+              disabled={heldByAnotherShip}
               onClick={() => apply(advanceDay)}
             >
               Sail on — one day
@@ -175,7 +183,7 @@ function VoyageView({
             <button
               type="button"
               className={sailing ? undefined : "ghost"}
-              disabled={otherNeedsCaptain}
+              disabled={heldByAnotherShip}
               onClick={() => setSailing((v) => !v)}
               aria-pressed={sailing}
             >

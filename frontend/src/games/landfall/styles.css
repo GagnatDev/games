@@ -304,7 +304,7 @@ button.lf-danger {
 }
 
 .lf-fleet__ship--alert {
-  border-color: color-mix(in srgb, var(--lf-bad, #c45c4a) 60%, transparent);
+  border-color: color-mix(in srgb, var(--lf-bad) 60%, transparent);
 }
 
 /* ── Contracts ──────────────────────────────────────────────────────────── */

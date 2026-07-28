@@ -276,15 +276,21 @@ export function arrivalOf(state: LandfallState, shipId: string): Arrival | undef
   return state.arrivals.find((arrival) => arrival.shipId === shipId);
 }
 
+/**
+ * Which of the four screens the bridge shows. Three of the names match their
+ * components exactly; `"port"` is free again now that v3 has dropped the
+ * company-wide `port` phase.
+ */
+export type BridgeView = "port" | "voyage" | "docking" | "bankrupt";
+
 /** What the bridge should show for the ship under command. */
-export function activeFocus(
-  state: LandfallState,
-): "operating" | "voyage" | "docking" | "bankrupt" {
+export function bridgeView(state: LandfallState): BridgeView {
   if (state.phase.kind === "bankrupt") return "bankrupt";
   const shipId = state.activeShipId;
-  if (shipId && arrivalOf(state, shipId)) return "docking";
-  if (shipId && voyageOf(state, shipId)) return "voyage";
-  return "operating";
+  if (shipId === null) return "port";
+  if (arrivalOf(state, shipId)) return "docking";
+  if (voyageOf(state, shipId)) return "voyage";
+  return "port";
 }
 
 /** Contract ids already spoken for by ships under way or in the roads. */

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_LOG,
   STATE_VERSION,
-  activeFocus,
   activeShip,
+  bridgeView,
   landfallStateSchema,
   logged,
   newGameState,
@@ -81,14 +81,14 @@ describe("a new company", () => {
     expect(landfallStateSchema.safeParse(fresh()).success).toBe(true);
   });
 
-  it("starts operating in port with one ship and a founding log entry", () => {
+  it("starts in port with one ship and a founding log entry", () => {
     const state = fresh();
     expect(state.phase).toEqual({ kind: "operating" });
     expect(state.voyages).toEqual([]);
     expect(state.arrivals).toEqual([]);
     expect(state.ships).toHaveLength(1);
     expect(activeShip(state)?.port).toBe("rotterdam");
-    expect(activeFocus(state)).toBe("operating");
+    expect(bridgeView(state)).toBe("port");
     expect(state.log[0]!.text).toMatch(/founded/);
   });
 });
@@ -116,7 +116,7 @@ describe("parseState", () => {
     expect(migrated!.voyages).toHaveLength(1);
     expect(migrated!.voyages[0]!.shipId).toBe("s1");
     expect(migrated!.arrivals).toEqual([]);
-    expect(activeFocus(migrated!)).toBe("voyage");
+    expect(bridgeView(migrated!)).toBe("voyage");
   });
 
   it("migrates a v2 docking save into the roads", () => {
@@ -138,7 +138,7 @@ describe("parseState", () => {
     expect(migrated!.arrivals).toHaveLength(1);
     expect(migrated!.arrivals[0]!.portId).toBe("london");
     expect(migrated!.voyages).toEqual([]);
-    expect(activeFocus(migrated!)).toBe("docking");
+    expect(bridgeView(migrated!)).toBe("docking");
   });
 
   it("migrates a v2 save in port with nothing under way", () => {
@@ -146,7 +146,7 @@ describe("parseState", () => {
     expect(migrated!.phase).toEqual({ kind: "operating" });
     expect(migrated!.voyages).toEqual([]);
     expect(migrated!.arrivals).toEqual([]);
-    expect(activeFocus(migrated!)).toBe("operating");
+    expect(bridgeView(migrated!)).toBe("port");
   });
 
   it("carries a wound-up v2 company through as bankrupt", () => {
@@ -154,7 +154,7 @@ describe("parseState", () => {
       v2Save({ phase: { kind: "bankrupt", day: 9, finalNetWorth: -50_000 } }),
     );
     expect(migrated!.phase).toEqual({ kind: "bankrupt", day: 9, finalNetWorth: -50_000 });
-    expect(activeFocus(migrated!)).toBe("bankrupt");
+    expect(bridgeView(migrated!)).toBe("bankrupt");
   });
 
   it("carries every shared field across unchanged", () => {

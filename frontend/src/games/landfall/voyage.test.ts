@@ -5,6 +5,7 @@ import { newGameState, type Contract, type LandfallState, type Ship } from "./st
 import {
   advanceDay,
   canCarry,
+  companyIsFinished,
   completeArrival,
   dayIsBlocked,
   depart,
@@ -111,6 +112,37 @@ describe("planning", () => {
     expect(
       canCarry(state.ships[0]!, { ...contractTo("london"), cargo: "crude-oil" }),
     ).toMatch(/no hold/);
+  });
+});
+
+describe("a wound-up company", () => {
+  const wound = (state: LandfallState): LandfallState => ({
+    ...state,
+    phase: { kind: "bankrupt", day: state.day, finalNetWorth: -1 },
+  });
+
+  it("is finished, and takes no further orders", () => {
+    const state = wound(company());
+    expect(companyIsFinished(state)).toBe(true);
+    expect(sail(state)).toBe(state);
+    expect(advanceDay(state)).toBe(state);
+  });
+
+  it("will not berth a ship already in the roads", () => {
+    let state = sail(company());
+    for (let i = 0; i < 60 && state.voyages.length > 0; i += 1) {
+      state = state.voyages[0]?.pendingEvent
+        ? resolveEvent(state, "heave-to", "s1")
+        : advanceDay(state);
+    }
+    expect(state.arrivals).toHaveLength(1);
+    const finished = wound(state);
+    const outcome = { method: "tug", damage: 0, emergencyTow: false } as const;
+    expect(completeArrival(finished, outcome, "s1")).toBe(finished);
+  });
+
+  it("is still trading while it is solvent", () => {
+    expect(companyIsFinished(company())).toBe(false);
   });
 });
 
@@ -386,6 +418,15 @@ describe("parallel freights", () => {
     state = sail(state, { ship: state.ships[0]!, to: "new-york", contractId: "c-a" });
     state = sail(state, { ship: state.ships[1]!, to: "singapore", contractId: "c-b" });
     expect(advanceDay(state)).toEqual(advanceDay(state));
+  });
+
+  it("leaves the ship under command alone when another casts off", () => {
+    // Casting off is not a change of command; the bridge decides what it shows.
+    let state = fleet([secondShip()]);
+    expect(state.activeShipId).toBe("s1");
+    state = sail(state, { ship: state.ships[1]!, to: "london", contractId: "c-b" });
+    expect(state.voyages.map((v) => v.shipId)).toEqual(["s2"]);
+    expect(state.activeShipId).toBe("s1");
   });
 
   it("strikes off a passage whose hull has left the fleet", () => {

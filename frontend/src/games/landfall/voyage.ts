@@ -105,13 +105,18 @@ export function dayIsBlocked(state: LandfallState): boolean {
   return state.voyages.some((voyage) => voyage.pendingEvent !== null);
 }
 
+/** A wound-up company takes no further orders. */
+export function companyIsFinished(state: LandfallState): boolean {
+  return state.phase.kind === "bankrupt";
+}
+
 /**
  * Cast off. Charges tolls, moves the ship to sea and records her passage
  * alongside any others already under way. The caller has validated fuel and
  * capacity; this trusts the plan.
  */
 export function depart(state: LandfallState, plan: DeparturePlan): LandfallState {
-  if (state.phase.kind === "bankrupt") return state;
+  if (companyIsFinished(state)) return state;
   if (plan.ship.port === null || plan.ship.chartered) return state;
   if (voyageOf(state, plan.ship.id) || arrivalOf(state, plan.ship.id)) return state;
   if (plan.contract && committedContractIds(state).has(plan.contract.id)) return state;
@@ -131,12 +136,7 @@ export function depart(state: LandfallState, plan: DeparturePlan): LandfallState
   };
 
   let next = replaceShip(
-    {
-      ...state,
-      cash: state.cash - tolls,
-      voyages: [...state.voyages, voyage],
-      activeShipId: plan.ship.id,
-    },
+    { ...state, cash: state.cash - tolls, voyages: [...state.voyages, voyage] },
     { ...plan.ship, port: null },
   );
   const destination = port(plan.route.legs[plan.route.legs.length - 1]!).name;
@@ -283,7 +283,7 @@ function putInRoads(state: LandfallState, voyage: Voyage): LandfallState {
  * a noon report waits for a decision. Ships that make port join `arrivals`.
  */
 export function advanceDay(state: LandfallState): LandfallState {
-  if (state.phase.kind === "bankrupt") return state;
+  if (companyIsFinished(state)) return state;
   if (dayIsBlocked(state)) return state;
 
   // Start the day with an empty passage list and rebuild it as each hull ticks;
@@ -313,11 +313,15 @@ export type EventChoice =
   | "sail-past"
   | "acknowledge";
 
-/** Settle the pending noon report on a ship and free the company calendar. */
+/**
+ * Settle the pending noon report on a ship and free the company calendar.
+ * `shipId` is explicit: with a fleet under way, the ship that needs the captain
+ * is often not the one under command.
+ */
 export function resolveEvent(
   state: LandfallState,
   choice: EventChoice,
-  shipId: string = state.activeShipId ?? "",
+  shipId: string,
 ): LandfallState {
   const voyage = voyageOf(state, shipId);
   const event = voyage?.pendingEvent;
@@ -466,11 +470,11 @@ export type DockingOutcome = {
 export function completeArrival(
   state: LandfallState,
   outcome: DockingOutcome,
-  shipId: string = state.activeShipId ?? "",
+  shipId: string,
 ): LandfallState {
   const arrival = arrivalOf(state, shipId);
   const ship = state.ships.find((s) => s.id === shipId);
-  if (!arrival || !ship || state.phase.kind === "bankrupt") return state;
+  if (!arrival || !ship || companyIsFinished(state)) return state;
 
   const here = port(arrival.portId);
   const model = shipModel(ship.model);

@@ -93,8 +93,13 @@ export function dockShipFor(dwt: number, handling: 1 | 2 | 3): DockShip {
   return { length, beam: Math.round(length / 6.2), handling };
 }
 
-/** Engine telegraph notches: full astern … full ahead. */
-export const TELEGRAPH_SPEEDS: readonly number[] = [-1.6, -0.8, 0, 0.9, 1.9, 3.2];
+/**
+ * Engine telegraph notches: full astern … full ahead, in m/s.
+ * Scaled so a straight run at full ahead can clear the farthest berth with
+ * time left to slow and lay alongside — the old 3.2 m/s top end only made it
+ * halfway across a 1200 m basin before the hourglass ran out.
+ */
+export const TELEGRAPH_SPEEDS: readonly number[] = [-6.0, -3.0, 0, 3.5, 7.5, 13.0];
 export const TELEGRAPH_LABELS: readonly string[] = [
   "Full astern",
   "Slow astern",
@@ -104,6 +109,7 @@ export const TELEGRAPH_LABELS: readonly string[] = [
   "Full ahead",
 ];
 export const TELEGRAPH_STOP = 2; // index of "Stop"
+export const TELEGRAPH_FULL_AHEAD = 5;
 
 export type DockOutcome =
   | { kind: "docked" }
@@ -129,7 +135,7 @@ export function newDockSim(harbor: Harbor): DockSim {
     x: harbor.entry.x,
     y: harbor.entry.y,
     heading: harbor.entry.heading,
-    speed: 1.6,
+    speed: 6.0,
     telegraph: 4, // slow ahead through the gate
     rudder: 0,
     t: 0,

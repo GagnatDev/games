@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   HARBORS,
+  TELEGRAPH_FULL_AHEAD,
+  TELEGRAPH_SPEEDS,
   TELEGRAPH_STOP,
   crashDamage,
   dockShipFor,
@@ -34,13 +36,35 @@ describe("ship handling", () => {
     const after = stepDock(stopped, { telegraph: TELEGRAPH_STOP, rudder: 1 }, ship, harbor, 0.1);
     expect(after.heading).toBeCloseTo(stopped.heading, 5);
 
-    const underway = run(newDockSim(harbor), 5, 1, 10);
+    const underway = run(newDockSim(harbor), TELEGRAPH_FULL_AHEAD, 1, 10);
     expect(underway.heading).toBeGreaterThan(0);
   });
 
   it("answers astern", () => {
     const backing = run({ ...newDockSim(harbor), speed: 0 }, 0, 0, 30);
     expect(backing.speed).toBeLessThan(0);
+  });
+
+  it("covers the entry-to-berth run at full ahead with time left to dock", () => {
+    // Regression: speeds used to top out at 3.2 m/s — only ~460 m inside a
+    // 150 s hourglass, short of every berth on a 1200 m basin.
+    const sluggish = 1 / (0.8 + ship.handling * 0.45);
+    for (const layout of Object.values(HARBORS)) {
+      const need = Math.hypot(
+        layout.berth.x - layout.entry.x,
+        layout.berth.y - layout.entry.y,
+      );
+      // Leave ~45% of the hourglass for the turn-and-alongside.
+      const budget = layout.timeLimit * 0.55;
+      let speed = newDockSim(layout).speed;
+      let travelled = 0;
+      for (let t = 0; t < budget; t += 0.1) {
+        const target = TELEGRAPH_SPEEDS[TELEGRAPH_FULL_AHEAD]!;
+        speed += (target - speed) * 0.14 * sluggish * 0.1;
+        travelled += speed * 0.1;
+      }
+      expect(travelled).toBeGreaterThan(need);
+    }
   });
 });
 
@@ -53,7 +77,7 @@ describe("outcomes", () => {
       heading: Math.PI / 2, // due south, straight at the quay
       speed: 3,
     };
-    const wreck = run(charging, 5, 0, 60);
+    const wreck = run(charging, TELEGRAPH_FULL_AHEAD, 0, 60);
     expect(wreck.outcome?.kind).toBe("crashed");
     if (wreck.outcome?.kind === "crashed") {
       expect(crashDamage(wreck.outcome.impact)).toBeGreaterThanOrEqual(3);

@@ -8,13 +8,14 @@ import {
   netWorth,
   passDay,
   refuel,
-  repair,
+  repairCostPerPoint,
   repayLoan,
   sellShip,
   setChartered,
   shipValue,
   shipyard,
   takeLoan,
+  yardJob,
 } from "./economy";
 import { newGameState, type LandfallState } from "./state";
 
@@ -114,12 +115,27 @@ describe("port business", () => {
     expect(filled.cash).toBe(state.cash - (model.fuelTank - 100) * price);
   });
 
-  it("repairs cost money and yard days", () => {
+  it("quotes yard work at a day per 12 points started", () => {
     const state = company();
-    const fixed = repair(state, "s1", 24);
-    expect(fixed.ships[0]!.condition).toBe(94);
-    expect(fixed.cash).toBeLessThan(state.cash);
-    expect(fixed.day).toBe(state.day + 2); // 24 points → two days in dock
+    const job = yardJob(state, "s1", 24)!;
+    expect(job.points).toBe(24);
+    expect(job.days).toBe(2);
+    expect(job.cost).toBe(24 * repairCostPerPoint(shipModel("tramp")));
+  });
+
+  it("caps the quote at the points actually missing", () => {
+    const state = company({ ships: [{ ...company().ships[0]!, condition: 95 }] });
+    const job = yardJob(state, "s1", 40)!;
+    expect(job.points).toBe(5);
+    expect(job.days).toBe(1);
+  });
+
+  it("has nothing to quote for a sound ship, an unknown ship or one at sea", () => {
+    const sound = company({ ships: [{ ...company().ships[0]!, condition: 100 }] });
+    expect(yardJob(sound, "s1", 10)).toBeNull();
+    expect(yardJob(company(), "nobody", 10)).toBeNull();
+    const atSea = company({ ships: [{ ...company().ships[0]!, port: null }] });
+    expect(yardJob(atSea, "s1", 10)).toBeNull();
   });
 
   it("sells at value less the broker's cut", () => {

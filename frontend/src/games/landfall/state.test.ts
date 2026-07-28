@@ -4,11 +4,14 @@ import {
   STATE_VERSION,
   activeShip,
   bridgeView,
+  committedContractIds,
   landfallStateSchema,
   logged,
   newGameState,
   parseState,
   replaceShip,
+  type Contract,
+  type LandfallState,
 } from "./state";
 
 function fresh() {
@@ -221,5 +224,66 @@ describe("helpers", () => {
     const next = replaceShip(state, { ...state.ships[0]!, fuel: 1 });
     expect(next.ships[0]!.fuel).toBe(1);
     expect(state.ships[0]!.fuel).toBe(120);
+  });
+
+  it("shows the port screen when no ship is under command", () => {
+    expect(bridgeView({ ...fresh(), activeShipId: null })).toBe("port");
+  });
+
+  describe("committedContractIds", () => {
+    const lot = (id: string): Contract => ({
+      id,
+      cargo: "grain",
+      tons: 100,
+      from: "rotterdam",
+      to: "london",
+      ratePerTon: 10,
+      payment: 1000,
+      deadlineDay: null,
+    });
+
+    it("gathers lots from both ships under way and ships in the roads", () => {
+      const state: LandfallState = {
+        ...fresh(),
+        voyages: [
+          {
+            shipId: "s1",
+            contract: lot("at-sea"),
+            speed: 12,
+            legs: ["rotterdam", "london"],
+            distanceNm: 165,
+            coveredNm: 10,
+            dayAtSea: 1,
+            piracy: 0,
+            lostTons: 0,
+            pendingEvent: null,
+          },
+        ],
+        arrivals: [
+          {
+            shipId: "s2",
+            portId: "london",
+            contract: lot("in-the-roads"),
+            lostTons: 0,
+            tugStrike: false,
+          },
+        ],
+      };
+      expect([...committedContractIds(state)].sort()).toEqual(["at-sea", "in-the-roads"]);
+    });
+
+    it("ignores hulls sailing in ballast", () => {
+      const state: LandfallState = {
+        ...fresh(),
+        arrivals: [
+          { shipId: "s1", portId: "london", contract: null, lostTons: 0, tugStrike: false },
+        ],
+      };
+      expect(committedContractIds(state).size).toBe(0);
+    });
+
+    it("is empty for a company with nothing at sea", () => {
+      expect(committedContractIds(fresh()).size).toBe(0);
+    });
   });
 });

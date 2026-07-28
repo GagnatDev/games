@@ -61,9 +61,9 @@ export function PortScreen({ state, apply }: { state: LandfallState; apply: Appl
   const here = ship.port;
   if (here === null) return null; // voyage phase owns this ship
 
-  const market = freightMarket(state, here).filter(
-    (contract) => !committedContractIds(state).has(contract.id),
-  );
+  // A lot another hull is already carrying is off the board.
+  const committed = committedContractIds(state);
+  const market = freightMarket(state, here).filter((contract) => !committed.has(contract.id));
   const blocked = dayIsBlocked(state);
   const planContract: Contract | null =
     planKey === "ballast" ? null : (market.find((c) => c.id === planKey) ?? null);

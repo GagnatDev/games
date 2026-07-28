@@ -293,16 +293,15 @@ export function bridgeView(state: LandfallState): BridgeView {
   return "port";
 }
 
-/** Contract ids already spoken for by ships under way or in the roads. */
+/**
+ * Contract ids already spoken for by ships under way or in the roads. Builds a
+ * fresh set on each call — hoist it out of loops rather than calling per item.
+ */
 export function committedContractIds(state: LandfallState): ReadonlySet<string> {
-  const ids = new Set<string>();
-  for (const voyage of state.voyages) {
-    if (voyage.contract) ids.add(voyage.contract.id);
-  }
-  for (const arrival of state.arrivals) {
-    if (arrival.contract) ids.add(arrival.contract.id);
-  }
-  return ids;
+  const committed = [...state.voyages, ...state.arrivals]
+    .map((passage) => passage.contract?.id)
+    .filter((id): id is string => id !== undefined);
+  return new Set(committed);
 }
 
 function migrateV2(raw: unknown): LandfallState | null {

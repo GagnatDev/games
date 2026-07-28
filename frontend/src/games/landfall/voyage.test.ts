@@ -31,10 +31,11 @@ function company(cash = 1_000_000): LandfallState {
   });
 }
 
-function secondShip(state: LandfallState, id = "s2"): Ship {
+/** A sister ship lying alongside in `company()`'s home port. */
+function secondShip(id = "s2", name = "Petrel"): Ship {
   return {
     id,
-    name: "Petrel",
+    name,
     model: "tramp",
     condition: 80,
     fuel: 280,
@@ -42,6 +43,12 @@ function secondShip(state: LandfallState, id = "s2"): Ship {
     chartered: false,
     boughtDay: 1,
   };
+}
+
+/** `company()` plus however many sister ships the test needs. */
+function fleet(ships: Ship[], cash = 1_000_000): LandfallState {
+  const state = company(cash);
+  return { ...state, ships: [...state.ships, ...ships] };
 }
 
 function contractTo(to: string, tons = 6000, id = "c1"): Contract {
@@ -57,14 +64,19 @@ function contractTo(to: string, tons = 6000, id = "c1"): Contract {
   };
 }
 
-function sail(state: LandfallState, ship = state.ships[0]!, to = "london", contractId = "c1"): LandfallState {
-  const from = ship.port ?? "rotterdam";
-  const route = shortestRoute(from, to)!;
+/** Cast off. Named options because four bare strings in a row read as noise. */
+function sail(
+  state: LandfallState,
+  opts: { ship?: Ship; to?: string; contractId?: string; speed?: number } = {},
+): LandfallState {
+  const ship = opts.ship ?? state.ships[0]!;
+  const to = opts.to ?? "london";
+  const route = shortestRoute(ship.port ?? "rotterdam", to)!;
   return depart(state, {
     ship,
-    contract: contractTo(to, 6000, contractId),
+    contract: contractTo(to, 6000, opts.contractId ?? "c1"),
     route,
-    speed: 12,
+    speed: opts.speed ?? 12,
   });
 }
 
@@ -249,17 +261,16 @@ describe("the whole passage", () => {
 
 describe("parallel freights", () => {
   it("lets a second ship cast off while the first is still at sea", () => {
-    let state = company();
-    state = { ...state, ships: [...state.ships, secondShip(state)] };
+    let state = fleet([secondShip()]);
 
-    state = sail(state, state.ships[0]!, "new-york", "c-a");
+    state = sail(state, { ship: state.ships[0]!, to: "new-york", contractId: "c-a" });
     expect(state.voyages).toHaveLength(1);
     expect(state.ships[0]!.port).toBeNull();
     expect(state.ships[1]!.port).toBe("rotterdam");
 
     // Switch command and take another contract out of the same port.
     state = { ...state, activeShipId: "s2" };
-    state = sail(state, state.ships[1]!, "london", "c-b");
+    state = sail(state, { ship: state.ships[1]!, to: "london", contractId: "c-b" });
 
     expect(state.phase.kind).toBe("operating");
     expect(state.voyages).toHaveLength(2);
@@ -267,10 +278,9 @@ describe("parallel freights", () => {
   });
 
   it("advances every ship under way on the same company day", () => {
-    let state = company();
-    state = { ...state, ships: [...state.ships, secondShip(state)] };
-    state = sail(state, state.ships[0]!, "new-york", "c-a");
-    state = sail(state, state.ships[1]!, "singapore", "c-b");
+    let state = fleet([secondShip()]);
+    state = sail(state, { ship: state.ships[0]!, to: "new-york", contractId: "c-a" });
+    state = sail(state, { ship: state.ships[1]!, to: "singapore", contractId: "c-b" });
 
     const next = advanceDay(state);
     expect(next.day).toBe(state.day + 1);
@@ -282,8 +292,7 @@ describe("parallel freights", () => {
   });
 
   it("refuses the same market lot twice", () => {
-    let state = company();
-    state = { ...state, ships: [...state.ships, secondShip(state)] };
+    let state = fleet([secondShip()]);
     const lot = contractTo("london", 6000, "shared");
     const route = shortestRoute("rotterdam", "london")!;
 

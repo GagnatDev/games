@@ -87,9 +87,9 @@ export function routeTolls(route: Route, dwt: number): number {
   return route.canals.reduce((sum, canal) => sum + canalToll(canal, dwt), 0);
 }
 
-/** Where a passage is bound — her last leg. */
-function destinationOf(voyage: Voyage): string {
-  return port(voyage.legs[voyage.legs.length - 1]!).name;
+/** The port at the end of a track — where she is bound. */
+export function lastLeg(legs: readonly string[]): string {
+  return legs[legs.length - 1]!;
 }
 
 /** Write a settled passage back over the one this ship was sailing. */
@@ -139,7 +139,7 @@ export function depart(state: LandfallState, plan: DeparturePlan): LandfallState
     { ...state, cash: state.cash - tolls, voyages: [...state.voyages, voyage] },
     { ...plan.ship, port: null },
   );
-  const destination = port(plan.route.legs[plan.route.legs.length - 1]!).name;
+  const destination = port(lastLeg(plan.route.legs)).name;
   next = logged(
     next,
     plan.contract
@@ -253,7 +253,7 @@ function tickVoyage(state: LandfallState, voyage: Voyage): VoyageTick | null {
  */
 function putInRoads(state: LandfallState, voyage: Voyage): LandfallState {
   const dice = new Dice(state.rng);
-  const portId = voyage.legs[voyage.legs.length - 1]!;
+  const portId = lastLeg(voyage.legs);
   const arrival: Arrival = {
     shipId: voyage.shipId,
     portId,
@@ -274,7 +274,7 @@ function putInRoads(state: LandfallState, voyage: Voyage): LandfallState {
   };
   return logged(
     next,
-    `${destinationOf(voyage)} roads. ${arrival.tugStrike ? "The tugs are on strike — she goes in by hand." : "Pilot aboard, berth assigned."}`,
+    `${port(portId).name} roads. ${arrival.tugStrike ? "The tugs are on strike — she goes in by hand." : "Pilot aboard, berth assigned."}`,
   );
 }
 
@@ -293,7 +293,8 @@ export function advanceDay(state: LandfallState): LandfallState {
   for (const voyage of state.voyages) {
     const tick = tickVoyage(next, voyage);
     if (!tick) {
-      next = logged(next, `${destinationOf(voyage)} passage struck off — no ship.`, "bad");
+      const bound = port(lastLeg(voyage.legs)).name;
+      next = logged(next, `${bound} passage struck off — no ship.`, "bad");
       continue;
     }
     next = tick.arrived

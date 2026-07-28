@@ -5,6 +5,7 @@ import {
   advanceDay,
   dayIsBlocked,
   fuelPerDayAt,
+  lastLeg,
   resolveEvent,
   type EventChoice,
 } from "../voyage";
@@ -42,7 +43,7 @@ function VoyageView({
 }) {
   const ship = state.ships.find((s) => s.id === voyage.shipId)!;
   const model = shipModel(ship.model);
-  const destination = voyage.legs[voyage.legs.length - 1]!;
+  const destination = lastLeg(voyage.legs);
   const origin = voyage.legs[0]!;
 
   const route: Route = {

@@ -87,6 +87,19 @@ export function routeTolls(route: Route, dwt: number): number {
   return route.canals.reduce((sum, canal) => sum + canalToll(canal, dwt), 0);
 }
 
+/** Where a passage is bound — her last leg. */
+function destinationOf(voyage: Voyage): string {
+  return port(voyage.legs[voyage.legs.length - 1]!).name;
+}
+
+/** Write a settled passage back over the one this ship was sailing. */
+function withVoyage(state: LandfallState, shipId: string, voyage: Voyage): LandfallState {
+  return {
+    ...state,
+    voyages: state.voyages.map((v) => (v.shipId === shipId ? voyage : v)),
+  };
+}
+
 /** True while any noon report waits — the company calendar does not move. */
 export function dayIsBlocked(state: LandfallState): boolean {
   return state.voyages.some((voyage) => voyage.pendingEvent !== null);
@@ -145,20 +158,27 @@ const STORM_CHANCE = 0.08;
 const RESCUE_CHANCE = 0.022;
 const CURRENT_CHANCE = 0.03;
 
-type VoyageTick =
-  | { kind: "continue"; voyage: Voyage; state: LandfallState; rng: number }
-  | { kind: "arrive"; voyage: Voyage; state: LandfallState; rng: number };
+type VoyageTick = {
+  voyage: Voyage;
+  /** The dice roll is already committed to `state.rng`. */
+  state: LandfallState;
+  /** She made her landfall this tick — the caller puts her in the roads. */
+  arrived: boolean;
+};
 
 /**
  * One day at sea for a single hull. Caller has already ticked the company
  * ledger; this burns fuel, wears the hull, advances the track and may open a
- * noon report or put her in the roads.
+ * noon report or make her landfall.
+ *
+ * Returns null when the passage has no hull left in the fleet — she cannot be
+ * sailed, so the caller strikes her off rather than tick her forever.
  */
-function tickVoyage(state: LandfallState, voyage: Voyage, rng: number): VoyageTick {
+function tickVoyage(state: LandfallState, voyage: Voyage): VoyageTick | null {
   const ship = state.ships.find((s) => s.id === voyage.shipId);
-  if (!ship) return { kind: "continue", voyage, state, rng };
+  if (!ship) return null;
 
-  const dice = new Dice(rng);
+  const dice = new Dice(state.rng);
   const model = shipModel(ship.model);
 
   const burn = fuelPerDayAt(ship.model, voyage.speed);
@@ -182,11 +202,11 @@ function tickVoyage(state: LandfallState, voyage: Voyage, rng: number): VoyageTi
     const cost = Math.round(40_000 + model.dwt * 1.5);
     updated = { ...updated, pendingEvent: { kind: "fuel", cost } };
     next = logged(next, `${ship.name} has burned her last ton of bunkers.`, "bad");
-    return { kind: "continue", voyage: updated, state: next, rng: dice.state };
+    return { voyage: updated, state: { ...next, rng: dice.state }, arrived: false };
   }
 
   if (covered >= voyage.distanceNm) {
-    return { kind: "arrive", voyage: updated, state: next, rng: dice.state };
+    return { voyage: updated, state: { ...next, rng: dice.state }, arrived: true };
   }
 
   // One noon report a day, worst news first.
@@ -224,11 +244,15 @@ function tickVoyage(state: LandfallState, voyage: Voyage, rng: number): VoyageTi
 
   updated = { ...updated, pendingEvent: pending };
   if (logText) next = logged(next, logText, tone);
-  return { kind: "continue", voyage: updated, state: next, rng: dice.state };
+  return { voyage: updated, state: { ...next, rng: dice.state }, arrived: false };
 }
 
-function putInRoads(state: LandfallState, voyage: Voyage, rng: number): LandfallState {
-  const dice = new Dice(rng);
+/**
+ * She has made her landfall: off the passage list, into the roads. Reads the
+ * dice from `state.rng` so there is only ever one of them in play.
+ */
+function putInRoads(state: LandfallState, voyage: Voyage): LandfallState {
+  const dice = new Dice(state.rng);
   const portId = voyage.legs[voyage.legs.length - 1]!;
   const arrival: Arrival = {
     shipId: voyage.shipId,
@@ -250,7 +274,7 @@ function putInRoads(state: LandfallState, voyage: Voyage, rng: number): Landfall
   };
   return logged(
     next,
-    `${port(portId).name} roads. ${arrival.tugStrike ? "The tugs are on strike — she goes in by hand." : "Pilot aboard, berth assigned."}`,
+    `${destinationOf(voyage)} roads. ${arrival.tugStrike ? "The tugs are on strike — she goes in by hand." : "Pilot aboard, berth assigned."}`,
   );
 }
 
@@ -262,33 +286,22 @@ export function advanceDay(state: LandfallState): LandfallState {
   if (state.phase.kind === "bankrupt") return state;
   if (dayIsBlocked(state)) return state;
 
-  // Snapshot who is under way, then rebuild the list as each hull ticks.
-  const underway = [...state.voyages];
-  let next = { ...passDay(state), voyages: [] as Voyage[] };
-  let rng = next.rng;
+  // Start the day with an empty passage list and rebuild it as each hull ticks;
+  // the ones that make port land in `arrivals` instead.
+  let next: LandfallState = { ...passDay(state), voyages: [] };
 
-  for (const voyage of underway) {
-    const priorVoyages = next.voyages;
-    const priorArrivals = next.arrivals;
-    const tick = tickVoyage(next, voyage, rng);
-    rng = tick.rng;
-    if (tick.kind === "arrive") {
-      next = putInRoads(
-        { ...tick.state, voyages: priorVoyages, arrivals: priorArrivals, rng },
-        tick.voyage,
-        rng,
-      );
-      rng = next.rng;
-    } else {
-      next = {
-        ...tick.state,
-        voyages: [...priorVoyages, tick.voyage],
-        arrivals: priorArrivals,
-      };
+  for (const voyage of state.voyages) {
+    const tick = tickVoyage(next, voyage);
+    if (!tick) {
+      next = logged(next, `${destinationOf(voyage)} passage struck off — no ship.`, "bad");
+      continue;
     }
+    next = tick.arrived
+      ? putInRoads(tick.state, tick.voyage)
+      : { ...tick.state, voyages: [...tick.state.voyages, tick.voyage] };
   }
 
-  return { ...next, rng };
+  return next;
 }
 
 export type EventChoice =
@@ -426,20 +439,13 @@ export function resolveEvent(
         "bad",
       );
       updated = { ...updated, coveredNm: voyage.distanceNm };
-      next = {
-        ...next,
-        rng: dice.state,
-        voyages: next.voyages.map((v) => (v.shipId === shipId ? updated : v)),
-      };
-      return putInRoads(next, updated, dice.state);
+      // Straight into the roads — no point writing her back onto the passage
+      // list that `putInRoads` is about to take her off.
+      return putInRoads({ ...next, rng: dice.state }, updated);
     }
   }
 
-  return {
-    ...next,
-    rng: dice.state,
-    voyages: next.voyages.map((v) => (v.shipId === shipId ? updated : v)),
-  };
+  return withVoyage({ ...next, rng: dice.state }, shipId, updated);
 }
 
 // ── Berthing & delivery ──────────────────────────────────────────────────────

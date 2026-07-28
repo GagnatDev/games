@@ -6,6 +6,7 @@ import { ApiError, SessionExpiredError, api } from "../../api/client";
 import { netWorth } from "./economy";
 import {
   STATE_VERSION,
+  activeFocus,
   parseState,
   type LandfallState,
   type Stats,
@@ -152,7 +153,12 @@ export default function Landfall() {
       if (next === current) return;
       setNotice(null);
       adopt(next, null);
-      queueSave(next, immediate || next.phase.kind !== current.phase.kind);
+      queueSave(
+        next,
+        immediate ||
+          next.phase.kind !== current.phase.kind ||
+          activeFocus(next) !== activeFocus(current),
+      );
     },
     [adopt, queueSave],
   );
@@ -359,14 +365,14 @@ export default function Landfall() {
             <>
               <StatusBar state={state} />
 
-              {state.phase.kind === "port" && <PortScreen state={state} apply={apply} />}
-              {state.phase.kind === "voyage" && <VoyageScreen state={state} apply={apply} />}
-              {state.phase.kind === "docking" && <DockingScreen state={state} apply={apply} />}
-              {state.phase.kind === "bankrupt" && (
+              {activeFocus(state) === "operating" && <PortScreen state={state} apply={apply} />}
+              {activeFocus(state) === "voyage" && <VoyageScreen state={state} apply={apply} />}
+              {activeFocus(state) === "docking" && <DockingScreen state={state} apply={apply} />}
+              {activeFocus(state) === "bankrupt" && (
                 <GameOverScreen state={state} onFoundAgain={() => setFounding(true)} />
               )}
 
-              {(state.phase.kind === "port" || state.phase.kind === "bankrupt") && (
+              {(activeFocus(state) === "operating" || activeFocus(state) === "bankrupt") && (
                 <Fortunes scores={scores} />
               )}
 

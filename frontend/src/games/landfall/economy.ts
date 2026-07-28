@@ -27,6 +27,7 @@ import {
   type LandfallState,
   type Ship,
 } from "./state";
+import { advanceDay, dayIsBlocked } from "./voyage";
 
 // ── Tuning ───────────────────────────────────────────────────────────────────
 
@@ -252,11 +253,14 @@ export function repair(state: LandfallState, shipId: string, points: number): La
   const cost = fixed * repairCostPerPoint(model);
   const days = Math.ceil(fixed / 12);
 
+  if (dayIsBlocked(state)) return state;
+
   let next = replaceShip(
     { ...state, cash: state.cash - cost },
     { ...ship, condition: Math.round((ship.condition + fixed) * 10) / 10 },
   );
-  for (let i = 0; i < days; i += 1) next = passDay(next);
+  // Yard time is company time — every ship under way sails on as well.
+  for (let i = 0; i < days; i += 1) next = advanceDay(next);
   return logged(
     next,
     `${ship.name} spent ${days} ${days === 1 ? "day" : "days"} in the yard — condition ${Math.round(ship.condition + fixed)}%.`,
@@ -367,9 +371,9 @@ export function passDay(state: LandfallState): LandfallState {
   return { ...state, day: state.day + 1, cash: Math.round(cash), ships };
 }
 
-/** Wait out a day in port for fresh cargo on the boards. */
+/** Wait out a day in port for fresh cargo on the boards. Ships at sea sail on. */
 export function waitDay(state: LandfallState): LandfallState {
-  return passDay(state);
+  return advanceDay(state);
 }
 
 /** The company is finished when everything it owns cannot cover the debt. */

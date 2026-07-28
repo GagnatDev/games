@@ -16,8 +16,9 @@ import {
   type DockSim,
   type Harbor,
 } from "../dock";
-import type { LandfallState } from "../state";
+import { arrivalOf, type LandfallState } from "../state";
 import type { Apply } from "./PortScreen";
+import { FleetStrip } from "./FleetStrip";
 import { money, tons } from "./format";
 
 /**
@@ -26,8 +27,9 @@ import { money, tons } from "./format";
  * answers slowly and remembers every wall.
  */
 export function DockingScreen({ state, apply }: { state: LandfallState; apply: Apply }) {
-  if (state.phase.kind !== "docking") return null;
-  const arrival = state.phase.arrival;
+  const shipId = state.activeShipId;
+  const arrival = shipId ? arrivalOf(state, shipId) : undefined;
+  if (!arrival) return null;
   const ship = state.ships.find((s) => s.id === arrival.shipId);
   if (!ship) return null;
 
@@ -39,6 +41,8 @@ export function DockingScreen({ state, apply }: { state: LandfallState; apply: A
 
   return (
     <div className="lf-docking stack">
+      <FleetStrip state={state} apply={apply} />
+
       <section className="card lf-panel stack">
         <header className="lf-panel__head">
           <div>
@@ -63,6 +67,7 @@ export function DockingScreen({ state, apply }: { state: LandfallState; apply: A
 
         <Berthing
           apply={apply}
+          shipId={arrival.shipId}
           harbor={harbor}
           dockShip={dockShipFor(model.dwt, model.handling)}
           tugAvailable={canAffordTug}
@@ -78,6 +83,7 @@ type Mode = "choice" | "manual";
 
 function Berthing({
   apply,
+  shipId,
   harbor,
   dockShip,
   tugAvailable,
@@ -85,6 +91,7 @@ function Berthing({
   fee,
 }: {
   apply: Apply;
+  shipId: string;
   harbor: Harbor;
   dockShip: DockShip;
   tugAvailable: boolean;
@@ -95,9 +102,9 @@ function Berthing({
 
   const finish = useCallback(
     (outcome: Parameters<typeof completeArrival>[1]) => {
-      apply((s) => completeArrival(s, outcome), true);
+      apply((s) => completeArrival(s, outcome, shipId), true);
     },
-    [apply],
+    [apply, shipId],
   );
 
   if (mode === "choice") {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_LOG,
   STATE_VERSION,
+  activeFocus,
   activeShip,
   landfallStateSchema,
   logged,
@@ -25,11 +26,14 @@ describe("a new company", () => {
     expect(landfallStateSchema.safeParse(fresh()).success).toBe(true);
   });
 
-  it("starts in port with one ship and a founding log entry", () => {
+  it("starts operating in port with one ship and a founding log entry", () => {
     const state = fresh();
-    expect(state.phase).toEqual({ kind: "port" });
+    expect(state.phase).toEqual({ kind: "operating" });
+    expect(state.voyages).toEqual([]);
+    expect(state.arrivals).toEqual([]);
     expect(state.ships).toHaveLength(1);
     expect(activeShip(state)?.port).toBe("rotterdam");
+    expect(activeFocus(state)).toBe("operating");
     expect(state.log[0]!.text).toMatch(/founded/);
   });
 });
@@ -47,6 +51,64 @@ describe("parseState", () => {
       log: [{ at: "2026-01-01T00:00:00.000Z", note: "deploy check" }],
     };
     expect(parseState(shellSave)).toBeNull();
+  });
+
+  it("migrates a v2 mid-voyage save onto the fleet lists", () => {
+    const v2 = {
+      version: 2,
+      company: "Old Lines",
+      homePort: "rotterdam",
+      day: 4,
+      cash: 800_000,
+      loan: 0,
+      reputation: 50,
+      seed: 1,
+      rng: 2,
+      ships: [
+        {
+          id: "s1",
+          name: "Kestrel",
+          model: "tramp",
+          condition: 80,
+          fuel: 100,
+          port: null,
+          chartered: false,
+          boughtDay: 1,
+        },
+      ],
+      activeShipId: "s1",
+      phase: {
+        kind: "voyage",
+        voyage: {
+          shipId: "s1",
+          contract: null,
+          speed: 12,
+          legs: ["rotterdam", "london"],
+          distanceNm: 165,
+          coveredNm: 40,
+          dayAtSea: 1,
+          piracy: 0,
+          lostTons: 0,
+          pendingEvent: null,
+        },
+      },
+      log: [{ day: 1, text: "hi", tone: "info" }],
+      stats: {
+        voyages: 0,
+        deliveredTons: 0,
+        milesSailed: 0,
+        rescues: 0,
+        manualDockings: 0,
+      },
+    };
+    const migrated = parseState(v2);
+    expect(migrated).not.toBeNull();
+    expect(migrated!.version).toBe(STATE_VERSION);
+    expect(migrated!.phase).toEqual({ kind: "operating" });
+    expect(migrated!.voyages).toHaveLength(1);
+    expect(migrated!.voyages[0]!.shipId).toBe("s1");
+    expect(migrated!.arrivals).toEqual([]);
+    expect(activeFocus(migrated!)).toBe("voyage");
   });
 
   it("rejects a future version and junk", () => {

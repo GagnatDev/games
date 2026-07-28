@@ -12,10 +12,10 @@ import { expect, test } from "./fixtures";
  * save mid-voyage with a chosen dice value rather than sailing blind.
  */
 
-/** A minimal, schema-valid v2 company document the tests build on. */
+/** A minimal, schema-valid v3 company document the tests build on. */
 function companyDocument(overrides: Record<string, unknown> = {}) {
   return {
-    version: 2,
+    version: 3,
     company: "Seeded Lines",
     homePort: "rotterdam",
     day: 3,
@@ -38,7 +38,9 @@ function companyDocument(overrides: Record<string, unknown> = {}) {
       },
     ],
     activeShipId: "s1",
-    phase: { kind: "port" },
+    voyages: [],
+    arrivals: [],
+    phase: { kind: "operating" },
     log: [{ day: 1, text: "Seeded for the test.", tone: "info" }],
     stats: {
       voyages: 0,
@@ -63,7 +65,7 @@ async function seedSave(page: Page, state: Record<string, unknown>): Promise<voi
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         state: doc,
-        stateVersion: 2,
+        stateVersion: 3,
         ...(current ? { expectedRevision: current.revision } : {}),
       }),
     });
@@ -104,9 +106,8 @@ test("a voyage arrives, takes the tug and banks the payment", async ({ page }) =
   await seedSave(
     page,
     companyDocument({
-      phase: {
-        kind: "voyage",
-        voyage: {
+      voyages: [
+        {
           shipId: "s1",
           contract: {
             id: "seeded-1",
@@ -127,7 +128,7 @@ test("a voyage arrives, takes the tug and banks the payment", async ({ page }) =
           lostTons: 0,
           pendingEvent: null,
         },
-      },
+      ],
     }),
   );
 
@@ -170,16 +171,15 @@ test("with the tugs on strike, the captain can hand over to the emergency tug", 
   await seedSave(
     page,
     companyDocument({
-      phase: {
-        kind: "docking",
-        arrival: {
+      arrivals: [
+        {
           shipId: "s1",
           portId: "piraeus",
           contract: null,
           lostTons: 0,
           tugStrike: true,
         },
-      },
+      ],
     }),
   );
 
@@ -204,8 +204,8 @@ test("a save from a newer build is reported, not overwritten", async ({ page }) 
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        state: { version: 3, fleet: "something this build has never seen" },
-        stateVersion: 3,
+        state: { version: 4, coffee: "something this build has never seen" },
+        stateVersion: 4,
       }),
     });
     return response.ok ? null : `${response.status} ${await response.text()}`;
@@ -222,5 +222,5 @@ test("a save from a newer build is reported, not overwritten", async ({ page }) 
     });
     return (await response.json()) as { stateVersion: number };
   });
-  expect(stored.stateVersion).toBe(3);
+  expect(stored.stateVersion).toBe(4);
 });

@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { cargo, port, shipModel } from "../world";
 import { positionAlong, type Route } from "../nav";
 import { advanceDay, fuelPerDayAt, resolveEvent, type EventChoice } from "../voyage";
-import type { LandfallState, PendingEvent, Voyage } from "../state";
+import { voyageOf, type LandfallState, type PendingEvent, type Voyage } from "../state";
 import type { Apply } from "./PortScreen";
 import { WorldMap } from "./WorldMap";
+import { FleetStrip } from "./FleetStrip";
 import { days, knots, money, nm, tons } from "./format";
 
 const SAIL_THROUGH_MS = 650;
@@ -12,11 +13,12 @@ const SAIL_THROUGH_MS = 650;
 /**
  * The passage: the chart with the ship inching along her track, the day
  * counter, and the noon reports. Any report that needs the captain stops the
- * clock until a choice is made.
+ * clock until a choice is made. Sister ships keep sailing on the same days.
  */
 export function VoyageScreen({ state, apply }: { state: LandfallState; apply: Apply }) {
-  if (state.phase.kind !== "voyage") return null;
-  const voyage = state.phase.voyage;
+  const shipId = state.activeShipId;
+  const voyage = shipId ? voyageOf(state, shipId) : undefined;
+  if (!voyage) return null;
   const ship = state.ships.find((s) => s.id === voyage.shipId);
   if (!ship) return null;
 
@@ -64,11 +66,15 @@ function VoyageView({
   }, [sailing, apply]);
 
   useEffect(() => {
-    if (voyage.pendingEvent && sailing) setSailing(false);
-  }, [voyage.pendingEvent, sailing]);
+    // Any noon report holds the fleet clock — stop the automatic run.
+    if (state.voyages.some((v) => v.pendingEvent) && sailing) setSailing(false);
+  }, [state.voyages, sailing]);
 
   const eta = state.day + daysLeft;
   const deadline = voyage.contract?.deadlineDay ?? null;
+  const otherNeedsCaptain = state.voyages.some(
+    (v) => v.shipId !== voyage.shipId && v.pendingEvent,
+  );
 
   return (
     <div className="lf-voyage stack">
@@ -78,6 +84,8 @@ function VoyageView({
         route={{ legs: voyage.legs, progress }}
         ship={at}
       />
+
+      <FleetStrip state={state} apply={apply} />
 
       <section className="card lf-panel stack" aria-label="Passage">
         <header className="lf-panel__head">
@@ -91,6 +99,12 @@ function VoyageView({
                 : "In ballast"}
               {" · "}
               {knots(voyage.speed)}
+              {state.voyages.length > 1 && (
+                <>
+                  {" · "}
+                  {state.voyages.length} ships under way
+                </>
+              )}
             </p>
           </div>
           <div className="lf-voyage__day" aria-label={`Day ${voyage.dayAtSea} at sea`}>
@@ -133,21 +147,35 @@ function VoyageView({
           )}
         </dl>
 
+        {otherNeedsCaptain && !voyage.pendingEvent && (
+          <p className="lf-warn">
+            Another ship needs the captain before the fleet can sail on. Switch
+            hulls on the strip above.
+          </p>
+        )}
+
         {voyage.pendingEvent ? (
           <NoonReport
             event={voyage.pendingEvent}
             speed={voyage.speed}
             maxSpeed={model.maxSpeed}
+            shipId={voyage.shipId}
             apply={apply}
           />
         ) : (
           <div className="row">
-            <button type="button" className="lf-primary" onClick={() => apply(advanceDay)}>
+            <button
+              type="button"
+              className="lf-primary"
+              disabled={otherNeedsCaptain}
+              onClick={() => apply(advanceDay)}
+            >
               Sail on — one day
             </button>
             <button
               type="button"
               className={sailing ? undefined : "ghost"}
+              disabled={otherNeedsCaptain}
               onClick={() => setSailing((v) => !v)}
               aria-pressed={sailing}
             >
@@ -167,14 +195,17 @@ function NoonReport({
   event,
   speed,
   maxSpeed,
+  shipId,
   apply,
 }: {
   event: PendingEvent;
   speed: number;
   maxSpeed: number;
+  shipId: string;
   apply: Apply;
 }) {
-  const choose = (choice: EventChoice) => () => apply((s) => resolveEvent(s, choice), true);
+  const choose = (choice: EventChoice) => () =>
+    apply((s) => resolveEvent(s, choice, shipId), true);
 
   switch (event.kind) {
     case "storm":

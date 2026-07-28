@@ -12,9 +12,13 @@ import { port } from "./world";
  * There is no company to carry over from it, so it does not migrate; the UI
  * reports it and offers to found a company, which is an explicit player
  * action, not a silent reset.
+ *
+ * Version 2 kept a single company-wide phase (port | voyage | docking), so
+ * only one ship could be under way. Version 3 lifts voyages and arrivals onto
+ * the fleet so several ships can carry freight at once.
  */
 
-export const STATE_VERSION = 2;
+export const STATE_VERSION = 3;
 
 // ── Pieces ───────────────────────────────────────────────────────────────────
 
@@ -100,9 +104,8 @@ export const arrivalSchema = z
 export type Arrival = z.infer<typeof arrivalSchema>;
 
 const phaseSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("port") }).strict(),
-  z.object({ kind: z.literal("voyage"), voyage: voyageSchema }).strict(),
-  z.object({ kind: z.literal("docking"), arrival: arrivalSchema }).strict(),
+  /** The company is trading; each ship's berth / voyage / arrival is its own. */
+  z.object({ kind: z.literal("operating") }).strict(),
   z
     .object({
       kind: z.literal("bankrupt"),
@@ -158,6 +161,10 @@ export const landfallStateSchema = z
     ships: z.array(shipSchema),
     /** The ship the player is commanding. */
     activeShipId: z.string().nullable(),
+    /** Concurrent passages — one entry per ship under way. */
+    voyages: z.array(voyageSchema),
+    /** Ships in the roads waiting to berth. */
+    arrivals: z.array(arrivalSchema),
     phase: phaseSchema,
     log: z.array(logEntrySchema).max(MAX_LOG),
     stats: statsSchema,
@@ -165,6 +172,39 @@ export const landfallStateSchema = z
   .strict();
 
 export type LandfallState = z.infer<typeof landfallStateSchema>;
+
+/** Version 2 kept voyage/docking on the company phase (one ship at a time). */
+const v2PhaseSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("port") }).strict(),
+  z.object({ kind: z.literal("voyage"), voyage: voyageSchema }).strict(),
+  z.object({ kind: z.literal("docking"), arrival: arrivalSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("bankrupt"),
+      day: z.number().int().positive(),
+      finalNetWorth: z.number(),
+    })
+    .strict(),
+]);
+
+const v2StateSchema = z
+  .object({
+    version: z.literal(2),
+    company: z.string().min(1),
+    homePort: z.string(),
+    day: z.number().int().positive(),
+    cash: z.number(),
+    loan: z.number().nonnegative(),
+    reputation: z.number().min(0).max(100),
+    seed: z.number().int().nonnegative(),
+    rng: z.number().int().nonnegative(),
+    ships: z.array(shipSchema),
+    activeShipId: z.string().nullable(),
+    phase: v2PhaseSchema,
+    log: z.array(logEntrySchema).max(MAX_LOG),
+    stats: statsSchema,
+  })
+  .strict();
 
 // ── Constructors & helpers ───────────────────────────────────────────────────
 
@@ -196,7 +236,9 @@ export function newGameState(founding: Founding): LandfallState {
       },
     ],
     activeShipId: founding.ship.id,
-    phase: { kind: "port" },
+    voyages: [],
+    arrivals: [],
+    phase: { kind: "operating" },
     log: [
       {
         day: 1,
@@ -237,8 +279,78 @@ export function replaceShip(state: LandfallState, ship: Ship): LandfallState {
   };
 }
 
-/** Unknown or future saves are reported, never silently reset. */
+export function voyageOf(state: LandfallState, shipId: string): Voyage | undefined {
+  return state.voyages.find((voyage) => voyage.shipId === shipId);
+}
+
+export function arrivalOf(state: LandfallState, shipId: string): Arrival | undefined {
+  return state.arrivals.find((arrival) => arrival.shipId === shipId);
+}
+
+/** What the bridge should show for the ship under command. */
+export function activeFocus(
+  state: LandfallState,
+): "operating" | "voyage" | "docking" | "bankrupt" {
+  if (state.phase.kind === "bankrupt") return "bankrupt";
+  const shipId = state.activeShipId;
+  if (shipId && arrivalOf(state, shipId)) return "docking";
+  if (shipId && voyageOf(state, shipId)) return "voyage";
+  return "operating";
+}
+
+/** Contract ids already spoken for by ships under way or in the roads. */
+export function committedContractIds(state: LandfallState): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const voyage of state.voyages) {
+    if (voyage.contract) ids.add(voyage.contract.id);
+  }
+  for (const arrival of state.arrivals) {
+    if (arrival.contract) ids.add(arrival.contract.id);
+  }
+  return ids;
+}
+
+function migrateV2(raw: unknown): LandfallState | null {
+  const parsed = v2StateSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const v2 = parsed.data;
+  let voyages: Voyage[] = [];
+  let arrivals: Arrival[] = [];
+  let phase: Phase;
+  if (v2.phase.kind === "voyage") {
+    voyages = [v2.phase.voyage];
+    phase = { kind: "operating" };
+  } else if (v2.phase.kind === "docking") {
+    arrivals = [v2.phase.arrival];
+    phase = { kind: "operating" };
+  } else if (v2.phase.kind === "bankrupt") {
+    phase = v2.phase;
+  } else {
+    phase = { kind: "operating" };
+  }
+  return {
+    version: STATE_VERSION,
+    company: v2.company,
+    homePort: v2.homePort,
+    day: v2.day,
+    cash: v2.cash,
+    loan: v2.loan,
+    reputation: v2.reputation,
+    seed: v2.seed,
+    rng: v2.rng,
+    ships: v2.ships,
+    activeShipId: v2.activeShipId,
+    voyages,
+    arrivals,
+    phase,
+    log: v2.log,
+    stats: v2.stats,
+  };
+}
+
+/** Unknown or future saves are reported, never silently reset. v2 migrates. */
 export function parseState(raw: unknown): LandfallState | null {
-  const result = landfallStateSchema.safeParse(raw);
-  return result.success ? result.data : null;
+  const current = landfallStateSchema.safeParse(raw);
+  if (current.success) return current.data;
+  return migrateV2(raw);
 }

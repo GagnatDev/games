@@ -303,6 +303,10 @@ button.lf-danger {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--lf-gold) 25%, transparent);
 }
 
+.lf-fleet__ship--alert {
+  border-color: color-mix(in srgb, var(--lf-bad, #c45c4a) 60%, transparent);
+}
+
 /* ── Contracts ──────────────────────────────────────────────────────────── */
 
 .lf-contracts {

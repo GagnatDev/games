@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { shipModel } from "./world";
 import { shortestRoute } from "./nav";
-import { newGameState, type Contract, type LandfallState } from "./state";
+import { newGameState, type Contract, type LandfallState, type Ship } from "./state";
 import {
   advanceDay,
   canCarry,
   completeArrival,
+  dayIsBlocked,
   depart,
   estimateVoyage,
   fuelNeeded,
@@ -30,9 +31,22 @@ function company(cash = 1_000_000): LandfallState {
   });
 }
 
-function contractTo(to: string, tons = 6000): Contract {
+function secondShip(state: LandfallState, id = "s2"): Ship {
   return {
-    id: "c1",
+    id,
+    name: "Petrel",
+    model: "tramp",
+    condition: 80,
+    fuel: 280,
+    port: "rotterdam",
+    chartered: false,
+    boughtDay: 1,
+  };
+}
+
+function contractTo(to: string, tons = 6000, id = "c1"): Contract {
+  return {
+    id,
     cargo: "grain",
     tons,
     from: "rotterdam",
@@ -43,11 +57,12 @@ function contractTo(to: string, tons = 6000): Contract {
   };
 }
 
-function sail(state: LandfallState): LandfallState {
-  const route = shortestRoute("rotterdam", "london")!;
+function sail(state: LandfallState, ship = state.ships[0]!, to = "london", contractId = "c1"): LandfallState {
+  const from = ship.port ?? "rotterdam";
+  const route = shortestRoute(from, to)!;
   return depart(state, {
-    ship: state.ships[0]!,
-    contract: contractTo("london"),
+    ship,
+    contract: contractTo(to, 6000, contractId),
     route,
     speed: 12,
   });
@@ -90,18 +105,19 @@ describe("planning", () => {
 describe("a day at sea", () => {
   it("advances the track, burns fuel and ticks the ledger", () => {
     const state = sail(company());
-    expect(state.phase.kind).toBe("voyage");
+    expect(state.phase.kind).toBe("operating");
+    expect(state.voyages).toHaveLength(1);
     expect(state.ships[0]!.port).toBeNull();
 
     const next = advanceDay(state);
     expect(next.day).toBe(state.day + 1);
     expect(next.ships[0]!.fuel).toBeLessThan(state.ships[0]!.fuel);
-    if (next.phase.kind === "voyage") {
-      expect(next.phase.voyage.dayAtSea).toBe(1);
-      expect(next.phase.voyage.coveredNm).toBeGreaterThan(0);
+    if (next.voyages[0]) {
+      expect(next.voyages[0].dayAtSea).toBe(1);
+      expect(next.voyages[0].coveredNm).toBeGreaterThan(0);
     } else {
       // Rotterdam–London is short; same-day arrival is legitimate.
-      expect(next.phase.kind).toBe("docking");
+      expect(next.arrivals).toHaveLength(1);
     }
   });
 
@@ -112,58 +128,56 @@ describe("a day at sea", () => {
 
   it("waits for the captain while a noon report is open", () => {
     let state = sail(company());
-    if (state.phase.kind !== "voyage") throw new Error("expected a voyage");
+    const voyage = state.voyages[0];
+    if (!voyage) throw new Error("expected a voyage");
     state = {
       ...state,
-      phase: {
-        kind: "voyage",
-        voyage: { ...state.phase.voyage, pendingEvent: { kind: "storm" } },
-      },
+      voyages: [{ ...voyage, pendingEvent: { kind: "storm" } }],
     };
+    expect(dayIsBlocked(state)).toBe(true);
     expect(advanceDay(state)).toBe(state);
   });
 
   it("loses way when the ship heaves to in a storm", () => {
     let state = sail(company());
     state = advanceDay(state);
-    if (state.phase.kind !== "voyage") return;
-    const covered = state.phase.voyage.coveredNm;
+    const voyage = state.voyages[0];
+    if (!voyage) return;
+    const covered = voyage.coveredNm;
     state = {
       ...state,
-      phase: {
-        kind: "voyage",
-        voyage: { ...state.phase.voyage, pendingEvent: { kind: "storm" } },
-      },
+      voyages: [{ ...voyage, pendingEvent: { kind: "storm" } }],
     };
-    const rode = resolveEvent(state, "heave-to");
-    if (rode.phase.kind !== "voyage") throw new Error("expected a voyage");
-    expect(rode.phase.voyage.pendingEvent).toBeNull();
-    expect(rode.phase.voyage.coveredNm).toBeLessThan(covered);
+    const rode = resolveEvent(state, "heave-to", voyage.shipId);
+    const after = rode.voyages[0];
+    if (!after) throw new Error("expected a voyage");
+    expect(after.pendingEvent).toBeNull();
+    expect(after.coveredNm).toBeLessThan(covered);
   });
 
   it("calls the tow when the bunkers run dry", () => {
     let state = sail(company());
-    if (state.phase.kind !== "voyage") throw new Error("expected a voyage");
+    const voyage = state.voyages[0];
+    if (!voyage) throw new Error("expected a voyage");
     // Swap in a long route with nothing in the tank.
     const route = shortestRoute("rotterdam", "new-york")!;
     state = {
       ...state,
       ships: state.ships.map((s) => ({ ...s, fuel: 5 })),
-      phase: {
-        kind: "voyage",
-        voyage: {
-          ...state.phase.voyage,
+      voyages: [
+        {
+          ...voyage,
           legs: [...route.legs],
           distanceNm: route.distanceNm,
         },
-      },
+      ],
     };
     const next = advanceDay(state);
-    if (next.phase.kind !== "voyage") throw new Error("expected a voyage");
-    expect(next.phase.voyage.pendingEvent?.kind).toBe("fuel");
+    expect(next.voyages[0]?.pendingEvent?.kind).toBe("fuel");
 
-    const towed = resolveEvent(next, "acknowledge");
-    expect(towed.phase.kind).toBe("docking");
+    const towed = resolveEvent(next, "acknowledge", "s1");
+    expect(towed.arrivals).toHaveLength(1);
+    expect(towed.voyages).toHaveLength(0);
     expect(towed.cash).toBeLessThan(next.cash);
   });
 });
@@ -172,22 +186,24 @@ describe("the whole passage", () => {
   it("sails Rotterdam to London, docks and gets paid", () => {
     let state = sail(company());
 
-    for (let i = 0; i < 60 && state.phase.kind === "voyage"; i += 1) {
-      state = state.phase.voyage.pendingEvent
+    for (let i = 0; i < 60 && state.voyages.length > 0; i += 1) {
+      const pending = state.voyages[0]?.pendingEvent;
+      state = pending
         ? resolveEvent(
             state,
-            state.phase.voyage.pendingEvent.kind === "storm" ? "heave-to" : "pay-tribute",
+            pending.kind === "storm" ? "heave-to" : "pay-tribute",
+            "s1",
           )
         : advanceDay(state);
     }
 
-    expect(state.phase.kind).toBe("docking");
-    if (state.phase.kind !== "docking") return;
-    expect(state.phase.arrival.portId).toBe("london");
+    expect(state.arrivals).toHaveLength(1);
+    expect(state.arrivals[0]!.portId).toBe("london");
 
     const cashBefore = state.cash;
-    const done = completeArrival(state, { method: "tug", damage: 0, emergencyTow: false });
-    expect(done.phase.kind).toBe("port");
+    const done = completeArrival(state, { method: "tug", damage: 0, emergencyTow: false }, "s1");
+    expect(done.phase.kind).toBe("operating");
+    expect(done.arrivals).toHaveLength(0);
     expect(done.ships[0]!.port).toBe("london");
     expect(done.stats.voyages).toBe(1);
     expect(done.stats.milesSailed).toBeGreaterThan(0);
@@ -197,14 +213,18 @@ describe("the whole passage", () => {
 
   it("docks clean by hand for a nod from the harbourmaster", () => {
     let state = sail(company());
-    for (let i = 0; i < 60 && state.phase.kind === "voyage"; i += 1) {
-      state = state.phase.voyage.pendingEvent
-        ? resolveEvent(state, "heave-to")
+    for (let i = 0; i < 60 && state.voyages.length > 0; i += 1) {
+      state = state.voyages[0]?.pendingEvent
+        ? resolveEvent(state, "heave-to", "s1")
         : advanceDay(state);
     }
-    if (state.phase.kind !== "docking") throw new Error("expected docking");
+    expect(state.arrivals).toHaveLength(1);
 
-    const done = completeArrival(state, { method: "manual", damage: 0, emergencyTow: false });
+    const done = completeArrival(
+      state,
+      { method: "manual", damage: 0, emergencyTow: false },
+      "s1",
+    );
     expect(done.stats.manualDockings).toBe(1);
   });
 
@@ -216,13 +236,70 @@ describe("the whole passage", () => {
       loan: 10_000_000,
       ships: state.ships.map((s) => ({ ...s, condition: 1 })),
     };
-    for (let i = 0; i < 60 && state.phase.kind === "voyage"; i += 1) {
-      state = state.phase.voyage.pendingEvent
-        ? resolveEvent(state, "heave-to")
+    for (let i = 0; i < 60 && state.voyages.length > 0; i += 1) {
+      state = state.voyages[0]?.pendingEvent
+        ? resolveEvent(state, "heave-to", "s1")
         : advanceDay(state);
     }
-    if (state.phase.kind !== "docking") throw new Error("expected docking");
-    const done = completeArrival(state, { method: "tug", damage: 0, emergencyTow: false });
+    expect(state.arrivals).toHaveLength(1);
+    const done = completeArrival(state, { method: "tug", damage: 0, emergencyTow: false }, "s1");
     expect(done.phase.kind).toBe("bankrupt");
+  });
+});
+
+describe("parallel freights", () => {
+  it("lets a second ship cast off while the first is still at sea", () => {
+    let state = company();
+    state = { ...state, ships: [...state.ships, secondShip(state)] };
+
+    state = sail(state, state.ships[0]!, "new-york", "c-a");
+    expect(state.voyages).toHaveLength(1);
+    expect(state.ships[0]!.port).toBeNull();
+    expect(state.ships[1]!.port).toBe("rotterdam");
+
+    // Switch command and take another contract out of the same port.
+    state = { ...state, activeShipId: "s2" };
+    state = sail(state, state.ships[1]!, "london", "c-b");
+
+    expect(state.phase.kind).toBe("operating");
+    expect(state.voyages).toHaveLength(2);
+    expect(state.ships.every((s) => s.port === null)).toBe(true);
+  });
+
+  it("advances every ship under way on the same company day", () => {
+    let state = company();
+    state = { ...state, ships: [...state.ships, secondShip(state)] };
+    state = sail(state, state.ships[0]!, "new-york", "c-a");
+    state = sail(state, state.ships[1]!, "singapore", "c-b");
+
+    const next = advanceDay(state);
+    expect(next.day).toBe(state.day + 1);
+    expect(next.voyages).toHaveLength(2);
+    for (const voyage of next.voyages) {
+      expect(voyage.dayAtSea).toBe(1);
+      expect(voyage.coveredNm).toBeGreaterThan(0);
+    }
+  });
+
+  it("refuses the same market lot twice", () => {
+    let state = company();
+    state = { ...state, ships: [...state.ships, secondShip(state)] };
+    const lot = contractTo("london", 6000, "shared");
+    const route = shortestRoute("rotterdam", "london")!;
+
+    state = depart(state, {
+      ship: state.ships[0]!,
+      contract: lot,
+      route,
+      speed: 12,
+    });
+    const again = depart(state, {
+      ship: state.ships[1]!,
+      contract: lot,
+      route,
+      speed: 12,
+    });
+    expect(again.voyages).toHaveLength(1);
+    expect(again).toBe(state);
   });
 });

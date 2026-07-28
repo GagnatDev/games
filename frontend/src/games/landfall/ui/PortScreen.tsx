@@ -21,9 +21,16 @@ import {
   takeLoan,
   waitDay,
 } from "../economy";
-import { canCarry, depart, effectiveMaxSpeed, estimateVoyage } from "../voyage";
-import { activeShip, type Contract, type LandfallState, type Ship } from "../state";
+import { canCarry, dayIsBlocked, depart, effectiveMaxSpeed, estimateVoyage } from "../voyage";
+import {
+  activeShip,
+  committedContractIds,
+  type Contract,
+  type LandfallState,
+  type Ship,
+} from "../state";
 import { WorldMap } from "./WorldMap";
+import { FleetStrip } from "./FleetStrip";
 import { days, knots, money, nm, tons } from "./format";
 
 export type Apply = (
@@ -54,7 +61,10 @@ export function PortScreen({ state, apply }: { state: LandfallState; apply: Appl
   const here = ship.port;
   if (here === null) return null; // voyage phase owns this ship
 
-  const market = freightMarket(state, here);
+  const market = freightMarket(state, here).filter(
+    (contract) => !committedContractIds(state).has(contract.id),
+  );
+  const blocked = dayIsBlocked(state);
   const planContract: Contract | null =
     planKey === "ballast" ? null : (market.find((c) => c.id === planKey) ?? null);
   const destination = planKey === "ballast" ? ballastTo : (planContract?.to ?? null);
@@ -110,11 +120,18 @@ export function PortScreen({ state, apply }: { state: LandfallState; apply: Appl
               <h2>{port(here).name} freight market</h2>
               <p className="muted small">
                 Day {state.day}. New offers post every morning.
+                {blocked && " A noon report elsewhere is holding the clock."}
               </p>
             </div>
             <button
               type="button"
               className="ghost"
+              disabled={blocked}
+              title={
+                blocked
+                  ? "A ship under way needs the captain before the day can turn."
+                  : undefined
+              }
               onClick={() => {
                 resetPlan();
                 apply(waitDay);
@@ -401,49 +418,6 @@ function canalNames(route: Route, around: Route | null): string {
   const canals = route.canals.length > 0 ? route.canals : (around ? ["canal"] : []);
   const names = canals.map((c) => (c === "suez" ? "Suez" : c === "panama" ? "Panama" : c));
   return `${[...new Set(names)].join(" & ")} — ${nm(route.distanceNm)}`;
-}
-
-// ── Fleet strip ──────────────────────────────────────────────────────────────
-
-function FleetStrip({
-  state,
-  apply,
-  onSwitch,
-}: {
-  state: LandfallState;
-  apply: Apply;
-  onSwitch: () => void;
-}) {
-  if (state.ships.length === 0) return null;
-  return (
-    <div className="lf-fleet" role="tablist" aria-label="Fleet">
-      {state.ships.map((ship) => {
-        const on = ship.id === state.activeShipId;
-        return (
-          <button
-            key={ship.id}
-            type="button"
-            role="tab"
-            aria-selected={on}
-            className={`lf-fleet__ship${on ? " lf-fleet__ship--on" : ""}`}
-            onClick={() => {
-              onSwitch();
-              apply((s) => ({ ...s, activeShipId: ship.id }));
-            }}
-          >
-            <strong>{ship.name}</strong>
-            <span className="muted small">
-              {ship.chartered
-                ? "on charter"
-                : ship.port
-                  ? `in ${port(ship.port).name}`
-                  : "at sea"}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 // ── Ship tab ─────────────────────────────────────────────────────────────────

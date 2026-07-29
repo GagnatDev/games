@@ -225,7 +225,7 @@ test("a refit locks the ship in dock without turning the calendar", async ({ pag
   await expect(page.getByRole("heading", { name: "Rotterdam freight market" })).toBeVisible();
   await expect(page.getByTestId("lf-day")).toHaveText("3");
 
-  await page.getByRole("tab", { name: "Ship" }).click();
+  await page.getByRole("tab", { name: "Ship", exact: true }).click();
   await page.getByRole("button", { name: /Full refit/ }).click();
 
   // She is in dock, the day has not moved, and she is nobody's to sail or sell.
@@ -245,7 +245,7 @@ test("a refit locks the ship in dock without turning the calendar", async ({ pag
   await page.getByRole("tab", { name: "Log" }).click();
   await expect(page.getByText(/Kestrel out of the yard after 3 days — condition 100%/)).toBeVisible();
 
-  await page.getByRole("tab", { name: "Ship" }).click();
+  await page.getByRole("tab", { name: "Ship", exact: true }).click();
   await expect(page.getByText("Condition 100%")).toBeVisible();
   await expect(page.getByRole("button", { name: /^Sell for/ })).toBeEnabled();
 });

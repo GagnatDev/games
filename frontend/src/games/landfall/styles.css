@@ -601,6 +601,11 @@ button.lf-offer:hover {
   gap: 0.6rem;
 }
 
+/* A hull in dock: the one action panel that is a state, not a choice. */
+.lf-action--yard {
+  border-color: color-mix(in srgb, var(--lf-gold) 45%, transparent);
+}
+
 .lf-action h3 {
   margin: 0;
   font-size: 0.8rem;

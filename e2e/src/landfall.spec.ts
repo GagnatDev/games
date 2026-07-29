@@ -12,7 +12,11 @@ import { expect, test } from "./fixtures";
  * save mid-voyage with a chosen dice value rather than sailing blind.
  */
 
-/** A minimal, schema-valid v3 company document the tests build on. */
+/**
+ * A minimal, schema-valid v3 company document the tests build on. Left at v3 on
+ * purpose: loading it proves the in-game migration onto v4 works through the
+ * real save API, not just in the unit tests.
+ */
 function companyDocument(overrides: Record<string, unknown> = {}) {
   return {
     version: 3,
@@ -195,6 +199,57 @@ test("with the tugs on strike, the captain can hand over to the emergency tug", 
   await expect(page.getByRole("heading", { name: "Piraeus freight market" })).toBeVisible();
 });
 
+test("a refit locks the ship in dock without turning the calendar", async ({ page }) => {
+  await page.goto("/landfall");
+  await expect(page.getByRole("heading", { name: "Found the company" })).toBeVisible();
+
+  // Alongside in Rotterdam with a tired hull: 36 points is three days in dock.
+  await seedSave(
+    page,
+    companyDocument({
+      ships: [
+        {
+          id: "s1",
+          name: "Kestrel",
+          model: "tramp",
+          condition: 64,
+          fuel: 200,
+          port: "rotterdam",
+          chartered: false,
+          boughtDay: 1,
+        },
+      ],
+    }),
+  );
+
+  await expect(page.getByRole("heading", { name: "Rotterdam freight market" })).toBeVisible();
+  await expect(page.getByTestId("lf-day")).toHaveText("3");
+
+  await page.getByRole("tab", { name: "Ship" }).click();
+  await page.getByRole("button", { name: /Full refit/ }).click();
+
+  // She is in dock, the day has not moved, and she is nobody's to sail or sell.
+  await expect(page.getByRole("heading", { name: /In the yard/ })).toContainText("out on day 6");
+  await expect(page.getByTestId("lf-day")).toHaveText("3");
+  await expect(page.locator(".lf-fleet__ship")).toContainText("in the yard · 3 days to go");
+  await expect(page.getByRole("button", { name: /^Sell for/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /time charter/ })).toBeDisabled();
+
+  // The captain spends the days himself, one at a time, from the market board.
+  await page.getByRole("tab", { name: "Freight market" }).click();
+  for (let i = 0; i < 3; i += 1) {
+    await page.getByRole("button", { name: "Wait a day" }).click();
+  }
+  await expect(page.getByTestId("lf-day")).toHaveText("6");
+
+  await page.getByRole("tab", { name: "Log" }).click();
+  await expect(page.getByText(/Kestrel out of the yard after 3 days — condition 100%/)).toBeVisible();
+
+  await page.getByRole("tab", { name: "Ship" }).click();
+  await expect(page.getByText("Condition 100%")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Sell for/ })).toBeEnabled();
+});
+
 test("a save from a newer build is reported, not overwritten", async ({ page }) => {
   await page.goto("/landfall");
   await expect(page.getByRole("heading", { name: "Found the company" })).toBeVisible();
@@ -204,8 +259,8 @@ test("a save from a newer build is reported, not overwritten", async ({ page }) 
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        state: { version: 4, coffee: "something this build has never seen" },
-        stateVersion: 4,
+        state: { version: 5, coffee: "something this build has never seen" },
+        stateVersion: 5,
       }),
     });
     return response.ok ? null : `${response.status} ${await response.text()}`;
@@ -222,5 +277,5 @@ test("a save from a newer build is reported, not overwritten", async ({ page }) 
     });
     return (await response.json()) as { stateVersion: number };
   });
-  expect(stored.stateVersion).toBe(4);
+  expect(stored.stateVersion).toBe(5);
 });

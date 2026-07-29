@@ -52,9 +52,10 @@ export const GAMES: readonly GameDefinition[] = [
     tagline:
       "Charter a tramp freighter, chase cargo across the world's ports, and try to out-trade the tide.",
     status: "beta",
-    // v3: concurrent voyages — several ships may carry freight at once.
-    // v2 saves migrate in-game; v1 shell saves are reported, never overwritten.
-    stateVersion: 3,
+    // v4: refits are jobs a hull sits out, so the yard no longer turns the
+    // company calendar. v2 and v3 saves migrate in-game; v1 shell saves are
+    // reported, never overwritten.
+    stateVersion: 4,
     config: {
       startingCapital: 2_500_000,
       currency: "USD",

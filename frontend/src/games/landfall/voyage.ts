@@ -23,11 +23,13 @@ import {
   portFee,
   tugFee,
 } from "./economy";
+import { tickRefits } from "./calendar";
 import { greatCircleNm, nodePosition, type Route } from "./nav";
 import {
   arrivalOf,
   committedContractIds,
   logged,
+  refitOf,
   replaceShip,
   voyageOf,
   type Arrival,
@@ -118,6 +120,7 @@ export function companyIsFinished(state: LandfallState): boolean {
 export function depart(state: LandfallState, plan: DeparturePlan): LandfallState {
   if (companyIsFinished(state)) return state;
   if (plan.ship.port === null || plan.ship.chartered) return state;
+  if (refitOf(state, plan.ship.id)) return state; // the yard still has her
   if (voyageOf(state, plan.ship.id) || arrivalOf(state, plan.ship.id)) return state;
   if (plan.contract && committedContractIds(state).has(plan.contract.id)) return state;
 
@@ -279,8 +282,9 @@ function putInRoads(state: LandfallState, voyage: Voyage): LandfallState {
 }
 
 /**
- * One day for the whole company: ledger, then every clear passage. No-op while
- * a noon report waits for a decision. Ships that make port join `arrivals`.
+ * One day for the whole company: ledger, then every clear passage, then the
+ * yard. No-op while a noon report waits for a decision. Ships that make port
+ * join `arrivals`; ships whose refit has run come out of dock mended.
  */
 export function advanceDay(state: LandfallState): LandfallState {
   if (companyIsFinished(state)) return state;
@@ -302,7 +306,7 @@ export function advanceDay(state: LandfallState): LandfallState {
       : { ...tick.state, voyages: [...tick.state.voyages, tick.voyage] };
   }
 
-  return next;
+  return tickRefits(next);
 }
 
 export type EventChoice =

@@ -9,6 +9,7 @@ import {
   logged,
   newGameState,
   parseState,
+  refitOf,
   replaceShip,
   type Contract,
   type LandfallState,
@@ -79,6 +80,15 @@ function v2Save(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * A schema-valid v3 save: the current document before the yard kept a dock list.
+ * Derived from a live one so it cannot drift out of step with the real schema.
+ */
+function v3Save(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const { refits: _refits, ...carried } = fresh();
+  return { ...carried, version: 3, ...overrides };
+}
+
 describe("a new company", () => {
   it("passes its own schema", () => {
     expect(landfallStateSchema.safeParse(fresh()).success).toBe(true);
@@ -89,6 +99,7 @@ describe("a new company", () => {
     expect(state.phase).toEqual({ kind: "operating" });
     expect(state.voyages).toEqual([]);
     expect(state.arrivals).toEqual([]);
+    expect(state.refits).toEqual([]);
     expect(state.ships).toHaveLength(1);
     expect(activeShip(state)?.port).toBe("rotterdam");
     expect(bridgeView(state)).toBe("port");
@@ -202,6 +213,41 @@ describe("parseState", () => {
     expect(parseState(v2Save({ phase: v2Voyage, voyages: [], arrivals: [] }))).toBeNull();
   });
 
+  it("migrates a v3 save into an empty dock, carrying everything else", () => {
+    const migrated = parseState(v3Save({ day: 12 }));
+    expect(migrated).not.toBeNull();
+    expect(migrated!.version).toBe(STATE_VERSION);
+    expect(migrated!.refits).toEqual([]);
+    expect(migrated!.day).toBe(12);
+    expect(migrated!.ships).toEqual(fresh().ships);
+    expect(migrated!.log).toEqual(fresh().log);
+  });
+
+  it("holds a v3 save to the same field constraints as a current one", () => {
+    expect(parseState(v3Save({ reputation: 150 }))).toBeNull();
+    expect(parseState(v3Save({ activeShipId: 7 }))).toBeNull();
+  });
+
+  it("rejects a v3 save carrying a v4 dock list", () => {
+    expect(parseState(v3Save({ refits: [] }))).toBeNull();
+  });
+
+  it("round-trips a hull the yard still has", () => {
+    const state: LandfallState = {
+      ...fresh(),
+      refits: [{ shipId: "s1", points: 24, days: 2, daysLeft: 1 }],
+    };
+    expect(parseState(JSON.parse(JSON.stringify(state)))).toEqual(state);
+  });
+
+  it("rejects a finished refit left in the dock list", () => {
+    const stale = {
+      ...fresh(),
+      refits: [{ shipId: "s1", points: 24, days: 2, daysLeft: 0 }],
+    };
+    expect(parseState(stale)).toBeNull();
+  });
+
   it("rejects a future version and junk", () => {
     expect(parseState({ ...fresh(), version: STATE_VERSION + 1 })).toBeNull();
     expect(parseState("not even an object")).toBeNull();
@@ -224,6 +270,24 @@ describe("helpers", () => {
     const next = replaceShip(state, { ...state.ships[0]!, fuel: 1 });
     expect(next.ships[0]!.fuel).toBe(1);
     expect(state.ships[0]!.fuel).toBe(120);
+  });
+
+  it("finds the yard job a hull is sitting out, and only hers", () => {
+    const state: LandfallState = {
+      ...fresh(),
+      refits: [{ shipId: "s1", points: 24, days: 2, daysLeft: 2 }],
+    };
+    expect(refitOf(state, "s1")?.points).toBe(24);
+    expect(refitOf(state, "s2")).toBeUndefined();
+    expect(refitOf(fresh(), "s1")).toBeUndefined();
+  });
+
+  it("keeps a hull in dock on the port screen — she has a berth, not a passage", () => {
+    const state: LandfallState = {
+      ...fresh(),
+      refits: [{ shipId: "s1", points: 24, days: 2, daysLeft: 2 }],
+    };
+    expect(bridgeView(state)).toBe("port");
   });
 
   it("shows the port screen when no ship is under command", () => {

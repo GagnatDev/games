@@ -27,12 +27,14 @@ import {
   effectiveMaxSpeed,
   estimateVoyage,
 } from "../voyage";
-import { repair } from "../calendar";
+import { beginRefit } from "../calendar";
 import {
   activeShip,
   committedContractIds,
+  refitOf,
   type Contract,
   type LandfallState,
+  type Refit,
   type Ship,
 } from "../state";
 import { WorldMap } from "./WorldMap";
@@ -48,6 +50,10 @@ type Tab = "market" | "ship" | "yard" | "bank" | "log";
 
 /** Why a day cannot be spent right now — shown wherever one is on offer. */
 const CLOCK_HELD = "A ship under way needs the captain before the day can turn.";
+
+/** Why a hull is not the captain's to dispose of at the moment. */
+const IN_THE_YARD = "The yard has her until the refit is done.";
+const ON_CHARTER = "She is fixed on charter — release her first.";
 
 /**
  * Life alongside: the freight market, the ship's own business, the yard, the
@@ -74,6 +80,7 @@ export function PortScreen({ state, apply }: { state: LandfallState; apply: Appl
   const committed = committedContractIds(state);
   const market = freightMarket(state, here).filter((contract) => !committed.has(contract.id));
   const blocked = dayIsBlocked(state);
+  const refit = refitOf(state, ship.id) ?? null;
   const planContract: Contract | null =
     planKey === "ballast" ? null : (market.find((c) => c.id === planKey) ?? null);
   const destination = planKey === "ballast" ? ballastTo : (planContract?.to ?? null);
@@ -130,6 +137,8 @@ export function PortScreen({ state, apply }: { state: LandfallState; apply: Appl
               <p className="muted small">
                 Day {state.day}. New offers post every morning.
                 {blocked && " A noon report elsewhere is holding the clock."}
+                {refit &&
+                  ` ${ship.name} is in the yard until day ${state.day + refit.daysLeft} — take freight for a sister, or wait the board out.`}
               </p>
             </div>
             <button
@@ -189,6 +198,7 @@ export function PortScreen({ state, apply }: { state: LandfallState; apply: Appl
                     <DeparturePlanner
                       state={state}
                       ship={ship}
+                      refit={refit}
                       contract={contract}
                       route={route}
                       aroundRoute={aroundRoute}
@@ -242,6 +252,7 @@ export function PortScreen({ state, apply }: { state: LandfallState; apply: Appl
               <DeparturePlanner
                 state={state}
                 ship={ship}
+                refit={refit}
                 contract={null}
                 route={route}
                 aroundRoute={aroundRoute}
@@ -270,6 +281,7 @@ export function PortScreen({ state, apply }: { state: LandfallState; apply: Appl
 function DeparturePlanner({
   state,
   ship,
+  refit,
   contract,
   route,
   aroundRoute,
@@ -282,6 +294,8 @@ function DeparturePlanner({
 }: {
   state: LandfallState;
   ship: Ship;
+  /** Non-null while the yard has her — she cannot be cast off. */
+  refit: Refit | null;
   contract: Contract | null;
   route: Route;
   aroundRoute: Route | null;
@@ -301,6 +315,7 @@ function DeparturePlanner({
   const fuelShort = Math.max(0, estimate.fuelTons - ship.fuel);
   const cannotPayTolls = estimate.tolls > state.cash;
   const chartered = ship.chartered;
+  const inYard = refit !== null;
 
   return (
     <div className="lf-planner stack" aria-label="Departure plan">
@@ -388,13 +403,19 @@ function DeparturePlanner({
         </p>
       )}
       {chartered && <p className="lf-warn">She is fixed on charter — release her first.</p>}
+      {refit && (
+        <p className="lf-warn">
+          She is in the yard until day {state.day + refit.daysLeft}. Send a sister
+          instead, or wait the days out alongside.
+        </p>
+      )}
       {cannotPayTolls && <p className="lf-warn">The canal dues exceed the cash box.</p>}
 
       <div className="row">
         <button
           type="button"
           className="lf-primary"
-          disabled={chartered || cannotPayTolls}
+          disabled={chartered || inYard || cannotPayTolls}
           onClick={() => {
             apply(
               (s) =>
@@ -442,7 +463,7 @@ function ShipTab({
   const perPoint = repairCostPerPoint(model);
   const toFix = Math.round(100 - ship.condition);
   const value = shipValue(model, ship.condition);
-  const blocked = dayIsBlocked(state);
+  const refit = refitOf(state, ship.id) ?? null;
 
   return (
     <section className="card lf-panel stack" aria-label="Ship">
@@ -503,31 +524,39 @@ function ShipTab({
           </div>
         </div>
 
-        <div className="lf-action">
-          <h3>Yard — {money(perPoint)} a point, a day per 12</h3>
-          <div className="row row--tight">
-            <button
-              type="button"
-              className="ghost"
-              disabled={toFix <= 0 || blocked}
-              title={blocked ? CLOCK_HELD : undefined}
-              onClick={() => apply((s) => repair(s, ship.id, Math.min(12, toFix)))}
-            >
-              Patch +12 ({money(Math.min(12, toFix) * perPoint)})
-            </button>
-            <button
-              type="button"
-              disabled={toFix <= 0 || blocked}
-              title={blocked ? CLOCK_HELD : undefined}
-              onClick={() => apply((s) => repair(s, ship.id, toFix))}
-            >
-              Full refit ({money(toFix * perPoint)})
-            </button>
+        {refit ? (
+          <InTheYard state={state} refit={refit} />
+        ) : (
+          <div className="lf-action">
+            <h3>Yard — {money(perPoint)} a point, a day per 12</h3>
+            <div className="row row--tight">
+              <button
+                type="button"
+                className="ghost"
+                disabled={toFix <= 0 || ship.chartered}
+                title={ship.chartered ? ON_CHARTER : undefined}
+                onClick={() => apply((s) => beginRefit(s, ship.id, Math.min(12, toFix)), true)}
+              >
+                Patch +12 ({money(Math.min(12, toFix) * perPoint)})
+              </button>
+              <button
+                type="button"
+                disabled={toFix <= 0 || ship.chartered}
+                title={ship.chartered ? ON_CHARTER : undefined}
+                onClick={() => apply((s) => beginRefit(s, ship.id, toFix), true)}
+              >
+                Full refit ({money(toFix * perPoint)})
+              </button>
+            </div>
+            {toFix > 0 && (
+              <p className="muted small">
+                She stays in dock while the work runs — the fleet trades on
+                without her, and the days pass as you spend them.
+              </p>
+            )}
+            {ship.chartered && toFix > 0 && <p className="lf-warn">{ON_CHARTER}</p>}
           </div>
-          {blocked && toFix > 0 && (
-            <p className="lf-warn">The yard bills in days — {CLOCK_HELD}</p>
-          )}
-        </div>
+        )}
 
         <div className="lf-action">
           <h3>Charter — {money(charterRate(ship))} a day, crew found</h3>
@@ -535,6 +564,8 @@ function ShipTab({
             <button
               type="button"
               className="ghost"
+              disabled={refit !== null}
+              title={refit ? IN_THE_YARD : undefined}
               onClick={() => apply((s) => setChartered(s, ship.id, !ship.chartered))}
             >
               {ship.chartered ? "Take her off charter" : "Fix her on time charter"}
@@ -548,6 +579,8 @@ function ShipTab({
             <button
               type="button"
               className="ghost lf-danger"
+              disabled={refit !== null}
+              title={refit ? IN_THE_YARD : undefined}
               onClick={() => apply((s) => sellShip(s, ship.id), true)}
             >
               Sell for {money(Math.round(value * 0.92))}
@@ -559,6 +592,41 @@ function ShipTab({
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * The dock. Yard time is no longer a fee the calendar pays on the spot: she sits
+ * here while the days are spent elsewhere, and the plates go back on the morning
+ * the last one runs out.
+ */
+function InTheYard({ state, refit }: { state: LandfallState; refit: Refit }) {
+  const done = refit.days - refit.daysLeft;
+  return (
+    <div className="lf-action lf-action--yard">
+      <h3>In the yard — out on day {state.day + refit.daysLeft}</h3>
+      <div className="lf-shipmeter">
+        <span className="lf-shipmeter__label">
+          Work done <strong>{done}</strong> of {days(refit.days)}
+        </span>
+        <span
+          className="lf-meter lf-meter--tall"
+          role="meter"
+          aria-valuenow={done}
+          aria-valuemin={0}
+          aria-valuemax={refit.days}
+          aria-label="Yard work"
+        >
+          <span style={{ width: `${(done / refit.days) * 100}%` }} />
+        </span>
+      </div>
+      <p className="muted small">
+        The bill is paid; {Math.round(refit.points)} points go back on the hull the
+        day she comes out. Until then she cannot sail, be chartered or be sold —
+        spend the days on the rest of the fleet, or wait them out at the market
+        board.
+      </p>
+    </div>
   );
 }
 

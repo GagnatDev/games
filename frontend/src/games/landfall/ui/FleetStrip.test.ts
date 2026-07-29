@@ -77,6 +77,17 @@ describe("shipStatus", () => {
     expect(shipStatus(state, state.ships[0]!)).toBe("on charter");
   });
 
+  it("counts down the days for a hull in the yard", () => {
+    const state: LandfallState = {
+      ...company(),
+      refits: [{ shipId: "s1", points: 24, days: 2, daysLeft: 2 }],
+    };
+    expect(shipStatus(state, state.ships[0]!)).toBe("in the yard · 2 days to go");
+    expect(
+      shipStatus({ ...state, refits: [{ ...state.refits[0]!, daysLeft: 1 }] }, state.ships[0]!),
+    ).toBe("in the yard · 1 day to go");
+  });
+
   it("treats a ship with neither berth nor passage as away", () => {
     const state = company();
     expect(shipStatus(state, { ...state.ships[0]!, port: null })).toBe("at sea");

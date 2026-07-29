@@ -1,5 +1,6 @@
 import { port } from "../world";
-import { arrivalOf, voyageOf, type LandfallState, type Ship } from "../state";
+import { arrivalOf, refitOf, voyageOf, type LandfallState, type Ship } from "../state";
+import { days } from "./format";
 import type { Apply } from "./PortScreen";
 
 /** One line of plain English for where a hull stands. */
@@ -12,6 +13,9 @@ export function shipStatus(state: LandfallState, ship: Ship): string {
   const voyage = voyageOf(state, ship.id);
   if (voyage?.pendingEvent) return "needs the captain";
   if (voyage) return "at sea";
+
+  const refit = refitOf(state, ship.id);
+  if (refit) return `in the yard · ${days(refit.daysLeft)} to go`;
 
   if (ship.port) return `in ${port(ship.port).name}`;
   return "at sea"; // No berth and no passage on record — treat her as away.

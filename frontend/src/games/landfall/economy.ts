@@ -22,6 +22,7 @@ import {
 import { shortestRoute } from "./nav";
 import {
   logged,
+  refitOf,
   replaceShip,
   type Contract,
   type LandfallState,
@@ -250,8 +251,8 @@ export type YardJob = {
 
 /**
  * What the yard would charge for this ship and how long she would be out of
- * service — null if there is no yard work to do here. Quoting only: spending
- * the days is `calendar.ts`, which is the layer that can see ships at sea.
+ * service — null if there is no yard work to do here. Quoting only: booking her
+ * in and counting the days down is `calendar.ts`.
  */
 export function yardJob(state: LandfallState, shipId: string, points: number): YardJob | null {
   const ship = state.ships.find((s) => s.id === shipId);
@@ -295,7 +296,7 @@ export function buyShip(
  * shipowner without ships is one loan away from the end. */
 export function sellShip(state: LandfallState, shipId: string): LandfallState {
   const ship = state.ships.find((s) => s.id === shipId);
-  if (!ship || ship.port === null) return state;
+  if (!ship || ship.port === null || refitOf(state, shipId)) return state;
   const proceeds = Math.round(shipValue(shipModel(ship.model), ship.condition) * 0.92);
   const remaining = state.ships.filter((s) => s.id !== shipId);
   const next: LandfallState = {
@@ -330,6 +331,9 @@ export function setChartered(
 ): LandfallState {
   const ship = state.ships.find((s) => s.id === shipId);
   if (!ship || ship.port === null) return state;
+  // A hull in dock cannot be handed to a charterer, and the yard will not take
+  // one that already is: `beginRefit` refuses her, so this pair cannot cross.
+  if (chartered && refitOf(state, shipId)) return state;
   const next = replaceShip(state, { ...ship, chartered });
   return logged(
     next,

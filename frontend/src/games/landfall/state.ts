@@ -15,10 +15,12 @@ import { port } from "./world";
  *
  * Version 2 kept a single company-wide phase (port | voyage | docking), so
  * only one ship could be under way. Version 3 lifts voyages and arrivals onto
- * the fleet so several ships can carry freight at once.
+ * the fleet so several ships can carry freight at once. Version 4 adds
+ * `refits`: yard work is now a job one hull sits out rather than days the whole
+ * company skips, so the rest of the fleet trades on around her.
  */
 
-export const STATE_VERSION = 3;
+export const STATE_VERSION = 4;
 
 // ── Pieces ───────────────────────────────────────────────────────────────────
 
@@ -103,6 +105,25 @@ export const arrivalSchema = z
 
 export type Arrival = z.infer<typeof arrivalSchema>;
 
+/**
+ * A hull in dock. The yard is paid when she goes in and the plates go back on
+ * the day she comes out; until then she is out of service — she cannot sail, be
+ * fixed on charter or be sold.
+ */
+export const refitSchema = z
+  .object({
+    shipId: z.string(),
+    /** Condition points the yard will put back when she comes out. */
+    points: z.number().positive(),
+    /** Days the job was quoted at — the denominator of the yard's progress. */
+    days: z.number().int().positive(),
+    /** Yard days still to run. A finished refit is struck, never kept at zero. */
+    daysLeft: z.number().int().positive(),
+  })
+  .strict();
+
+export type Refit = z.infer<typeof refitSchema>;
+
 /** The end of the company — shared by every state version, past and present. */
 const bankruptPhaseSchema = z
   .object({
@@ -168,6 +189,8 @@ export const landfallStateSchema = z
     voyages: z.array(voyageSchema),
     /** Ships in the roads waiting to berth. */
     arrivals: z.array(arrivalSchema),
+    /** Ships in dock — one entry per hull the yard still has. */
+    refits: z.array(refitSchema),
     phase: phaseSchema,
     log: z.array(logEntrySchema).max(MAX_LOG),
     stats: statsSchema,
@@ -185,14 +208,20 @@ const v2PhaseSchema = z.discriminatedUnion("kind", [
 ]);
 
 /**
- * v2 is v3 minus the fleet lists, plus the old phase. Deriving it keeps the
- * twelve fields the two versions share in exactly one place, so tightening a
- * constraint on the current schema cannot leave the migration accepting saves
- * the game would reject.
+ * v2 is the current document minus the fleet lists, plus the old phase, and v3
+ * is it minus the yard's dock list. Deriving both from the live schema keeps the
+ * fields the versions share in exactly one place, so tightening a constraint on
+ * the current schema cannot leave a migration accepting saves the game would
+ * reject.
  */
 const v2StateSchema = landfallStateSchema
-  .omit({ version: true, voyages: true, arrivals: true, phase: true })
+  .omit({ version: true, voyages: true, arrivals: true, refits: true, phase: true })
   .extend({ version: z.literal(2), phase: v2PhaseSchema })
+  .strict();
+
+const v3StateSchema = landfallStateSchema
+  .omit({ version: true, refits: true })
+  .extend({ version: z.literal(3) })
   .strict();
 
 // ── Constructors & helpers ───────────────────────────────────────────────────
@@ -227,6 +256,7 @@ export function newGameState(founding: Founding): LandfallState {
     activeShipId: founding.ship.id,
     voyages: [],
     arrivals: [],
+    refits: [],
     phase: { kind: "operating" },
     log: [
       {
@@ -276,6 +306,11 @@ export function arrivalOf(state: LandfallState, shipId: string): Arrival | undef
   return state.arrivals.find((arrival) => arrival.shipId === shipId);
 }
 
+/** The yard job this hull is sitting out, if she is in dock. */
+export function refitOf(state: LandfallState, shipId: string): Refit | undefined {
+  return state.refits.find((refit) => refit.shipId === shipId);
+}
+
 /**
  * Which of the four screens the bridge shows. Three of the names match their
  * components exactly; `"port"` is free again now that v3 has dropped the
@@ -309,19 +344,27 @@ function migrateV2(raw: unknown): LandfallState | null {
   if (!parsed.success) return null;
   const { phase, ...carried } = parsed.data;
 
-  // Only these four fields move between versions; everything else carries over.
+  // Only these five fields move between versions; everything else carries over.
   return {
     ...carried,
     version: STATE_VERSION,
     voyages: phase.kind === "voyage" ? [phase.voyage] : [],
     arrivals: phase.kind === "docking" ? [phase.arrival] : [],
+    refits: [],
     phase: phase.kind === "bankrupt" ? phase : { kind: "operating" },
   };
 }
 
-/** Unknown or future saves are reported, never silently reset. v2 migrates. */
+/** v3 knew no yard jobs: it could only ever have skipped the days outright. */
+function migrateV3(raw: unknown): LandfallState | null {
+  const parsed = v3StateSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  return { ...parsed.data, version: STATE_VERSION, refits: [] };
+}
+
+/** Unknown or future saves are reported, never silently reset. v2 and v3 migrate. */
 export function parseState(raw: unknown): LandfallState | null {
   const current = landfallStateSchema.safeParse(raw);
   if (current.success) return current.data;
-  return migrateV2(raw);
+  return migrateV3(raw) ?? migrateV2(raw);
 }

@@ -73,9 +73,9 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 20
           resources:
-            requests:
+            requests: # ~2x observed usage; keeps the cluster on one node (homectl-infra#29)
               cpu: 100m
-              memory: 256Mi
+              memory: 160Mi
             limits:
               memory: 512Mi
 

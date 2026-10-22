@@ -8,7 +8,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: build shared + backend + frontend
 # -----------------------------------------------------------------------------
-FROM node:24-alpine AS build
+FROM node:24.22.1-alpine AS build
 WORKDIR /app
 
 RUN corepack enable
@@ -31,7 +31,7 @@ RUN pnpm --filter @games/shared run build \
 # -----------------------------------------------------------------------------
 # Stage 2: runtime — no node_modules, the server is a single bundle
 # -----------------------------------------------------------------------------
-FROM node:24-alpine
+FROM node:24.22.1-alpine
 WORKDIR /app
 
 RUN adduser -D -g "" appuser

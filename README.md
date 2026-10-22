@@ -46,7 +46,7 @@ docs/                        architecture, data model, adding a game, PWA notes
 
 ## Quickstart
 
-Requires Node 24 and pnpm (`corepack enable`), plus Docker for the local database.
+Requires Node >=24.22.1 and pnpm (`corepack enable`), plus Docker for the local database.
 
 ```bash
 pnpm install

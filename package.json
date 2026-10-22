@@ -4,7 +4,7 @@
   "description": "games.homectl.no — a PWA hosting several small games, one code-split chunk each",
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=24"
+    "node": ">=24.22.1"
   },
   "scripts": {
     "dev": "pnpm --parallel -r run dev",

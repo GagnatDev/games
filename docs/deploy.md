@@ -1,5 +1,11 @@
 # Deploy
 
+> **Retired.** `games` has been undeployed to free memory on the cluster node
+> (see [homectl-infra#32](https://github.com/GagnatDev/homectl-infra/issues/32)).
+> The `deploy.yml` workflow has been removed and the app is no longer registered in
+> homectl-infra or homectl-auth. The rest of this document describes how it used to
+> be deployed.
+
 `games` runs on Kapsule in the `homectl` namespace, behind the shared nginx ingress.
 Background: [`homectl-reference/skills/deploy-app`](https://github.com/GagnatDev/homectl-reference/blob/main/skills/deploy-app/SKILL.md).
 

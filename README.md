@@ -1,5 +1,8 @@
 # games
 
+> **Retired:** no longer deployed to `games.homectl.no` (see
+> [homectl-infra#32](https://github.com/GagnatDev/homectl-infra/issues/32)).
+
 `games.homectl.no` — one installable PWA hosting several small games, each at its
 own address and in its own bundle:
 
